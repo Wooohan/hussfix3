@@ -8,7 +8,6 @@ import { Landing } from './pages/Landing';
 import { AdminPanel } from './pages/AdminPanel';
 import { FMCSARegister } from './pages/FMCSARegister';
 // Added placeholder import for InsuranceScraper
-import { InsuranceScraper } from './pages/InsuranceScraper'; 
 import { ViewState, User, CarrierData } from './types';
 import { Settings as SettingsIcon } from 'lucide-react';
 import { fetchCarriersFromSupabase, CarrierFilters } from './services/supabaseClient';
