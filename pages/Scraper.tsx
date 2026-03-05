@@ -6,6 +6,7 @@ import { saveCarrierToSupabase } from '../services/supabaseClient';
 
 // CONFIGURATION
 const CONCURRENCY_LIMIT = 1; 
+const MAX_RETRIES = 0; // Total 3 attempts per MC
 
 // Helper for delays
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
