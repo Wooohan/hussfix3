@@ -1,5 +1,3 @@
-
-
 import { CarrierData, User } from '../types';
 
 // === MOCK DATA GENERATION (Fallback/Demo) ===
@@ -364,20 +362,26 @@ export const scrapeRealCarrier = async (mcNumber: string, useProxy: boolean): Pr
     return match && match[1] ? match[1].trim() : '';
   };
 
-  const legalName = extract(/Legal Name:(.*?)DBA/);
-  const dbaName = extract(/DBA Name:(.*?)Physical Address/);
-  const physicalAddress = extract(/Physical Address:(.*?)Phone/);
-  const phone = extract(/Phone:(.*?)Mailing Address/);
-  const mailingAddress = extract(/Mailing Address:(.*?)USDOT/);
-  const dotNumber = extract(/USDOT Number:(.*?)State Carrier ID Number/);
-  const stateCarrierId = extract(/State Carrier ID Number:(.*?)MC\/MX\/FF Number/);
-  const powerUnits = extract(/Power Units:(.*?)Drivers/);
-  const drivers = extract(/Drivers:(.*?)MCS-150 Form Date/);
-  const mcs150Date = extract(/MCS-150 Form Date:(.*?)MCS/);
-  const mcs150MileageRaw = extract(/MCS-150 Mileage \(Year\):(.*?)(?:Operation Classification|$)/);
-  const mcs150Mileage = mcs150MileageRaw.replace('Operation Classification:', '').trim();
-  const outOfServiceDate = extract(/Out of Service Date:(.*?)Legal Name/);
-  const dunsNumber = extract(/DUNS Number:(.*?)Power Units/);
+  // Refined regex patterns to stop at the next logical label or end of line/section
+  const legalName = extract(/Legal Name:\s*(.*?)(?:DBA Name:|Physical Address:|$)/);
+  const dbaName = extract(/DBA Name:\s*(.*?)(?:Physical Address:|$)/);
+  const physicalAddress = extract(/Physical Address:\s*(.*?)(?:Phone:|$)/);
+  const phone = extract(/Phone:\s*(.*?)(?:Mailing Address:|$)/);
+  const mailingAddress = extract(/Mailing Address:\s*(.*?)(?:USDOT Number:|$)/);
+  const dotNumber = extract(/USDOT Number:\s*(.*?)(?:State Carrier ID Number:|$)/);
+  const stateCarrierId = extract(/State Carrier ID Number:\s*(.*?)(?:MC\/MX\/FF Number\(s\):|$)/);
+  
+  // Power Units and Drivers often have numbers, so we look for digits and stop before the next label
+  const powerUnits = extract(/Power Units:\s*(\d+)(?:\s*Non-CMV Units:|$)/);
+  const drivers = extract(/Drivers:\s*(\d+)(?:\s*MCS-150 Form Date:|$)/);
+  
+  const mcs150Date = extract(/MCS-150 Form Date:\s*(.*?)(?:MCS-150 Mileage \(Year\):|$)/);
+  
+  // Mileage often contains "(Year)" and we want to stop before "Operation Classification" or end of section
+  const mcs150Mileage = extract(/MCS-150 Mileage \(Year\):\s*(.*?)(?:Operation Classification:|$)/);
+  
+  const outOfServiceDate = extract(/Out of Service Date:\s*(.*?)(?:Legal Name:|$)/);
+  const dunsNumber = extract(/DUNS Number:\s*(.*?)(?:Power Units:|$)/);
 
   const operationClassification = findMarkedLabels(doc, "Operation Classification");
   const carrierOperation = findMarkedLabels(doc, "Carrier Operation");
