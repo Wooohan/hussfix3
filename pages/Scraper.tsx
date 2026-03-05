@@ -4,8 +4,10 @@ import { CarrierData, ScraperConfig, User } from '../types';
 import { generateMockCarrier, scrapeRealCarrier, downloadCSV, fetchSafetyData } from '../services/mockService';
 import { saveCarrierToSupabase } from '../services/supabaseClient';
 
-// RESTORED SPEED
 const CONCURRENCY_LIMIT = 5;
+
+// Helper for throttling
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 interface ScraperProps {
   user: User;
@@ -61,7 +63,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
       }
       setIsRunning(true);
       isRunningRef.current = true;
-      setLogs(prev => [...prev, `🚀 Initializing Safety Scraper Engine...`]);
+      setLogs(prev => [...prev, `🚀 Engine Started (Throttle: 0.5s-1.0s)`]);
       setScrapedData([]);
       setProgress(0);
       setDbSaveCount(0);
@@ -95,11 +97,9 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
            await new Promise(r => setTimeout(r, 150));
            newData = generateMockCarrier(mc, config.includeBrokers);
         } else {
-           // STEP 1: Get Basic Data
+           // FETCH DATA
            const baseCarrier = await scrapeRealCarrier(mc, config.useProxy);
-           
            if (baseCarrier && baseCarrier.dotNumber) {
-             // STEP 2: Immediately Fetch Safety (Fixes the undefined/NA issue)
              const safety = await fetchSafetyData(baseCarrier.dotNumber);
              newData = {
                ...baseCarrier,
@@ -111,15 +111,12 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
 
         if (newData) {
           const matchesFilter = !config.onlyAuthorized || newData.status.toUpperCase().includes('AUTHORIZED');
-          
           if (matchesFilter) {
             setScrapedData(prev => [...prev, newData!]);
             successfulResults.push(newData!);
-            
             const saveResult = await saveCarrierToSupabase(newData!);
             if (saveResult.success) {
               setDbSaveCount(prev => prev + 1);
-              // LOG FIX: Uses the local newData variable to ensure rating is populated
               setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName} | Rating: ${newData!.safetyRating}`]);
             }
             sessionExtracted++;
@@ -131,6 +128,11 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
       } catch (e) {
         setLogs(prev => [...prev, `[Error] MC ${mc}: Connection Failed.`]);
       }
+
+      // === ADDED DELAY HERE ===
+      // Generates a random delay between 500ms and 1000ms
+      const delayTime = Math.floor(Math.random() * (1000 - 500 + 1) + 500);
+      await sleep(delayTime);
 
       completed++;
       setProgress(Math.round((completed / total) * 100));
@@ -183,6 +185,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
         </div>
 
         <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
+          {/* Sidebar / Parameters */}
           <div className="col-span-12 lg:col-span-4 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar">
             <section className="bg-slate-900/50 border border-slate-800 p-6 rounded-3xl space-y-5">
               <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm uppercase tracking-wider">
@@ -234,6 +237,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
             </section>
           </div>
 
+          {/* Main Console & Feed */}
           <div className="col-span-12 lg:col-span-8 flex flex-col gap-6 min-h-0">
             <div className="flex-[1] bg-slate-950 border border-slate-800 rounded-3xl p-5 font-mono text-[11px] overflow-y-auto relative custom-scrollbar">
               <div className="sticky top-0 bg-slate-950/90 backdrop-blur pb-3 mb-3 border-b border-slate-900 flex items-center justify-between">
