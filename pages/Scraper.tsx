@@ -9,12 +9,10 @@ const CONCURRENCY_LIMIT = 5;
 interface ScraperProps {
   user: User;
   onUpdateUsage: (count: number) => void;
-  onNewCarriers: (data: CarrierData[]) => void;
   onUpgrade: () => void;
-  onFinish?: () => void;
 }
 
-export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarriers, onUpgrade, onFinish }) => {
+export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade }) => {
   const [isRunning, setIsRunning] = useState(false);
   const [config, setConfig] = useState<ScraperConfig>({
     startPoint: '1580000',
@@ -23,13 +21,12 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
     includeBrokers: false,
     onlyAuthorized: true,
     useMockData: false,
-    useProxy: true,
+    useProxy: true, // Default to using proxy
   });
   const [logs, setLogs] = useState<string[]>([]);
   const [scrapedData, setScrapedData] = useState<CarrierData[]>([]);
   const [progress, setProgress] = useState(0);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [dbSaveCount, setDbSaveCount] = useState(0);
   const [selectedCarrier, setSelectedCarrier] = useState<CarrierData | null>(null);
   
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -58,29 +55,30 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
       setLogs(prev => [...prev, `🚀 Initializing High-Speed Scraper...`]);
       setLogs(prev => [...prev, `Mode: ${config.useMockData ? 'Simulation' : config.useProxy ? 'Proxy Network' : 'Direct (VPN)'}`]);
       setLogs(prev => [...prev, `Targeting ${config.recordCount} records starting at MC# ${config.startPoint}`]);
-      setLogs(prev => [...prev, `💾 Supabase integration: ACTIVE`]);
       setScrapedData([]);
       setProgress(0);
-      setDbSaveCount(0);
       processScrapingConcurrent();
     }
   };
 
+  // Concurrent Processing Implementation
   const processScrapingConcurrent = async () => {
     const start = parseInt(config.startPoint);
     const total = config.recordCount;
     let completed = 0;
     
+    // Track usage locally for this session to handle closure state
     let sessionExtracted = 0;
     const initialUsed = user.recordsExtractedToday;
     const limit = user.dailyLimit;
     
+    // Create an array of tasks
     const tasks = Array.from({ length: total }, (_, i) => (start + i).toString());
-    const successfulResults: CarrierData[] = [];
 
     const worker = async (mc: string) => {
       if (!isRunningRef.current) return;
 
+      // Check limit before processing
       if (initialUsed + sessionExtracted >= limit) {
         isRunningRef.current = false;
         setIsRunning(false);
@@ -96,12 +94,14 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
            const isBroker = config.includeBrokers && (!config.includeCarriers || Math.random() > 0.5);
            newData = generateMockCarrier(mc, isBroker);
         } else {
+           // No artificial delay for maximum speed
            newData = await scrapeRealCarrier(mc, config.useProxy);
         }
       } catch (e) {
-        // Silent fail
+        // Silent fail or log
       }
 
+      // Filter Logic
       if (newData) {
          let matchesFilter = true;
          const type = newData.entityType.toUpperCase();
@@ -113,6 +113,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
          if (!config.includeBrokers && isBroker && !isCarrier) matchesFilter = false;
          
          if (config.onlyAuthorized) {
+             // Strict Check: Must include AUTHORIZED and MUST NOT include NOT AUTHORIZED
              if (status.includes('NOT AUTHORIZED') || !status.includes('AUTHORIZED')) {
                  matchesFilter = false;
              }
@@ -120,18 +121,14 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
 
          if (matchesFilter) {
              setScrapedData(prev => [...prev, newData!]);
-             successfulResults.push(newData!);
+             setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName}`]);
              
-             const saveResult = await saveCarrierToSupabase(newData!);
-             if (saveResult.success) {
-               setDbSaveCount(prev => prev + 1);
-               setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName} → Saved to DB`]);
-             } else {
-               setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName} → DB Error: ${saveResult.error}`]);
-             }
-             
+             // Increment usage
              sessionExtracted++;
              onUpdateUsage(1);
+         } else {
+            // Optional: Reduce log noise for speed
+            // setLogs(prev => [...prev, `[Skipped] MC ${mc}`]);
          }
       } else {
          setLogs(prev => [...prev, `[Fail] MC ${mc} - No Data`]);
@@ -141,6 +138,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
       setProgress(Math.round((completed / total) * 100));
     };
 
+    // Execute with concurrency limit
     const activePromises: Promise<void>[] = [];
     
     for (const mc of tasks) {
@@ -158,19 +156,9 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
 
     await Promise.all(activePromises);
 
-    if (successfulResults.length > 0) {
-      onNewCarriers(successfulResults);
-    }
-
     setIsRunning(false);
     isRunningRef.current = false;
-    setLogs(prev => [...prev, `✅ Batch Job Complete. Found ${successfulResults.length} records.`]);
-    setLogs(prev => [...prev, `💾 Database: ${dbSaveCount} records persisted to Supabase`]);
-
-    // Note: We keep the onFinish but the user can now see safety data here too
-    if (onFinish && successfulResults.length > 0) {
-      setLogs(prev => [...prev, `🚀 Batch complete. You can now view safety reports or export data.`]);
-    }
+    setLogs(prev => [...prev, "✅ Batch Job Complete."]);
   };
 
   const handleDownload = () => {
@@ -181,24 +169,6 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
   return (
     <div className="p-8 h-screen flex flex-col overflow-hidden relative">
       
-      {showUpgradeModal && (
-        <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-800 border border-slate-700 p-8 rounded-2xl max-w-md text-center shadow-2xl animate-in zoom-in duration-200">
-              <div className="w-16 h-16 bg-indigo-500/20 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-400">
-                 <Lock size={32} />
-              </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Daily Limit Reached</h2>
-              <p className="text-slate-400 mb-6">
-                You've hit your limit of {user.dailyLimit.toLocaleString()} records. Upgrade your plan to extract unlimited data.
-              </p>
-              <div className="flex gap-4 justify-center">
-                <button onClick={() => setShowUpgradeModal(false)} className="px-4 py-2 text-slate-400 hover:text-white">Close</button>
-                <button onClick={onUpgrade} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold">View Plans</button>
-              </div>
-          </div>
-        </div>
-      )}
-
       {/* Carrier Detail Modal */}
       {selectedCarrier && (
         <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-md z-50 flex items-center justify-center p-6">
@@ -212,7 +182,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
                 onClick={() => setSelectedCarrier(null)}
                 className="p-2 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-colors"
               >
-                <X size={24} />
+                <Pause className="rotate-45" size={24} />
               </button>
             </div>
             
@@ -277,21 +247,21 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
                   <ShieldCheck size={20} className="text-green-400" />
                   Out of Service (OOS) Rates
                 </h3>
-                <div className="bg-slate-900 rounded-xl border border-slate-700 overflow-hidden">
+                <div className="overflow-hidden rounded-xl border border-slate-700">
                   <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-800 text-slate-400">
+                    <thead className="bg-slate-900 text-slate-400">
                       <tr>
-                        <th className="p-4 font-medium">Type</th>
-                        <th className="p-4 font-medium">Carrier Rate</th>
-                        <th className="p-4 font-medium">National Avg</th>
+                        <th className="p-4 font-medium">Inspection Type</th>
+                        <th className="p-4 font-medium">OOS %</th>
+                        <th className="p-4 font-medium">National Avg %</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800 text-white">
+                    <tbody className="divide-y divide-slate-800 bg-slate-900/30">
                       {selectedCarrier.oosRates?.map((rate, i) => (
                         <tr key={i}>
-                          <td className="p-4 font-medium">{rate.type}</td>
-                          <td className="p-4 font-mono">{rate.rate}</td>
-                          <td className="p-4 font-mono text-slate-400">{rate.nationalAvg}</td>
+                          <td className="p-4 text-white font-medium">{rate.type}</td>
+                          <td className="p-4 text-indigo-400 font-mono">{rate.oosPercent}</td>
+                          <td className="p-4 text-slate-500 font-mono">{rate.nationalAvg}</td>
                         </tr>
                       ))}
                       {(!selectedCarrier.oosRates || selectedCarrier.oosRates.length === 0) && (
@@ -304,6 +274,34 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
                 </div>
               </div>
             </div>
+            
+            <div className="p-6 border-t border-slate-700 bg-slate-800/50 flex justify-end">
+              <button 
+                onClick={() => setSelectedCarrier(null)}
+                className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold transition-colors"
+              >
+                Close Details
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Limit Modal */}
+      {showUpgradeModal && (
+        <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-slate-700 p-8 rounded-2xl max-w-md text-center shadow-2xl animate-in zoom-in duration-200">
+             <div className="w-16 h-16 bg-indigo-500/20 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-400">
+                <Lock size={32} />
+             </div>
+             <h2 className="text-2xl font-bold text-white mb-2">Daily Limit Reached</h2>
+             <p className="text-slate-400 mb-6">
+               You've hit your limit of {user.dailyLimit.toLocaleString()} records. Upgrade your plan to extract unlimited data.
+             </p>
+             <div className="flex gap-4 justify-center">
+               <button onClick={() => setShowUpgradeModal(false)} className="px-4 py-2 text-slate-400 hover:text-white">Close</button>
+               <button onClick={onUpgrade} className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold">View Plans</button>
+             </div>
           </div>
         </div>
       )}
@@ -311,7 +309,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-3xl font-bold text-white mb-2">Live Scraper</h1>
-          <p className="text-slate-400">Automated FMCSA Extraction Engine with Safety Reports</p>
+          <p className="text-slate-400">Automated FMCSA Extraction Engine</p>
         </div>
         <div className="flex gap-4">
            {scrapedData.length > 0 && (
@@ -320,7 +318,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
               className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-medium transition-all"
             >
               <Download size={20} />
-              Export Full Report
+              Export CSV
             </button>
            )}
           <button
@@ -338,6 +336,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
 
       <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
         
+        {/* Configuration Panel */}
         <div className="col-span-12 lg:col-span-4 space-y-6 overflow-y-auto pr-2">
           
           <div className="bg-slate-800/50 border border-slate-700 p-6 rounded-2xl space-y-6">
@@ -370,6 +369,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
                 />
               </div>
 
+              {/* Proxy Settings */}
               <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Connection Mode</label>
                 <div className="space-y-3">
@@ -433,7 +433,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
                 </label>
                 
                 <div className="bg-slate-900 p-3 rounded-lg border border-slate-700 opacity-50">
-                    <label className="flex items-center justify-between cursor-pointer">
+                   <label className="flex items-center justify-between cursor-pointer">
                         <span className="text-xs text-slate-400">Mock Mode (Simulation)</span>
                         <input 
                           type="checkbox" 
@@ -448,6 +448,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
             </div>
           </div>
 
+          {/* Progress Card */}
           <div className="bg-slate-800/50 border border-slate-700 p-6 rounded-2xl">
              <div className="flex justify-between text-sm mb-2">
                <span className="text-slate-400">Batch Progress</span>
@@ -457,36 +458,28 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
                <div className="bg-gradient-to-r from-indigo-500 to-purple-500 h-2.5 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
              </div>
 
-             <div className="space-y-4">
-               <div className="flex justify-between items-center text-sm border-t border-slate-700 pt-4">
-                 <div className="flex flex-col">
-                   <span className="text-slate-500 text-xs">Daily Limit Usage</span>
-                   <div className="flex items-center gap-1">
-                     <span className={`font-bold ${user.recordsExtractedToday >= user.dailyLimit ? 'text-red-400' : 'text-white'}`}>
-                      {user.recordsExtractedToday.toLocaleString()}
-                     </span>
-                     <span className="text-slate-500">/ {user.dailyLimit.toLocaleString()}</span>
-                   </div>
-                 </div>
-                 <div className="flex flex-col items-end">
-                   <span className="text-slate-500 text-xs">Batch Extracted</span>
-                   <span className="text-white font-bold">{scrapedData.length}</span>
+             <div className="flex justify-between items-center text-sm border-t border-slate-700 pt-4">
+               <div className="flex flex-col">
+                 <span className="text-slate-500 text-xs">Daily Limit Usage</span>
+                 <div className="flex items-center gap-1">
+                   <span className={`font-bold ${user.recordsExtractedToday >= user.dailyLimit ? 'text-red-400' : 'text-white'}`}>
+                    {user.recordsExtractedToday.toLocaleString()}
+                   </span>
+                   <span className="text-slate-500">/ {user.dailyLimit.toLocaleString()}</span>
                  </div>
                </div>
-
-               <div className="flex justify-between items-center text-sm border-t border-slate-700 pt-4">
-                 <div className="flex items-center gap-2">
-                   <Database size={16} className="text-emerald-400" />
-                   <span className="text-slate-500 text-xs">Saved to Supabase</span>
-                 </div>
-                 <span className="text-emerald-400 font-bold">{dbSaveCount}</span>
+               <div className="flex flex-col items-end">
+                 <span className="text-slate-500 text-xs">Batch Extracted</span>
+                 <span className="text-white font-bold">{scrapedData.length}</span>
                </div>
              </div>
           </div>
         </div>
 
+        {/* Results / Terminal Panel */}
         <div className="col-span-12 lg:col-span-8 flex flex-col gap-6 h-full min-h-0">
           
+          {/* Terminal Output */}
           <div className="flex-1 bg-slate-950 rounded-2xl border border-slate-800 font-mono text-sm p-4 overflow-y-auto custom-scrollbar relative">
              <div className="absolute top-0 left-0 right-0 bg-slate-900/90 backdrop-blur p-2 border-b border-slate-800 flex items-center justify-between px-4 sticky z-10">
                 <div className="flex items-center gap-2">
@@ -519,6 +512,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
              </div>
           </div>
 
+          {/* Table Preview (Mini) */}
           <div className="h-72 bg-slate-800/50 border border-slate-700 rounded-2xl overflow-hidden flex flex-col">
             <div className="p-4 border-b border-slate-700 bg-slate-800/80 flex justify-between items-center">
               <h3 className="font-bold text-white text-sm">Live Results Preview</h3>
@@ -530,7 +524,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
                   <tr>
                     <th className="p-3 font-medium text-xs uppercase tracking-wider">MC#</th>
                     <th className="p-3 font-medium text-xs uppercase tracking-wider">Legal Name</th>
-                    <th className="p-3 font-medium text-xs uppercase tracking-wider">Safety</th>
+                    <th className="p-3 font-medium text-xs uppercase tracking-wider">Rating</th>
                     <th className="p-3 font-medium text-xs uppercase tracking-wider">Status</th>
                     <th className="p-3 font-medium text-xs uppercase tracking-wider">Email</th>
                     <th className="p-3 font-medium text-xs uppercase tracking-wider">Action</th>
@@ -545,14 +539,14 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
                     </tr>
                   ) : (
                     scrapedData.slice().reverse().map((row, i) => (
-                      <tr key={i} className="hover:bg-slate-700/50 transition-colors">
+                      <tr key={i} className="hover:bg-slate-700/50 transition-colors group">
                         <td className="p-3 font-mono text-white">{row.mcNumber}</td>
                         <td className="p-3 truncate max-w-[150px]" title={row.legalName}>{row.legalName}</td>
                         <td className="p-3">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            row.safetyRating === 'SATISFACTORY' ? 'bg-green-500/20 text-green-400' :
-                            row.safetyRating === 'UNSATISFACTORY' ? 'bg-red-500/20 text-red-400' :
-                            'bg-slate-800 text-slate-400'
+                            row.safetyRating === 'SATISFACTORY' ? 'bg-green-500/20 text-green-300' :
+                            row.safetyRating === 'UNSATISFACTORY' ? 'bg-red-500/20 text-red-300' :
+                            'bg-slate-700 text-slate-400'
                           }`}>
                             {row.safetyRating || 'N/A'}
                           </span>
@@ -574,10 +568,9 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
                         <td className="p-3">
                           <button 
                             onClick={() => setSelectedCarrier(row)}
-                            className="p-1.5 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors"
-                            title="View Full Report"
+                            className="text-xs text-indigo-400 hover:text-indigo-300 font-bold opacity-0 group-hover:opacity-100 transition-opacity"
                           >
-                            <Info size={16} />
+                            Details
                           </button>
                         </td>
                       </tr>
