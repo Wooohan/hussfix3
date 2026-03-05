@@ -3,7 +3,6 @@ import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import { Scraper } from './pages/Scraper';
 import { CarrierSearch } from './pages/CarrierSearch';
-import { InsuranceScraper } from './pages/InsuranceScraper';
 import { Subscription } from './pages/Subscription';
 import { Landing } from './pages/Landing';
 import { AdminPanel } from './pages/AdminPanel';
