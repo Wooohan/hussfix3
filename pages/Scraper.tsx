@@ -4,7 +4,7 @@ import { CarrierData, ScraperConfig, User } from '../types';
 import { generateMockCarrier, scrapeRealCarrier, downloadCSV } from '../services/mockService';
 import { saveCarrierToSupabase } from '../services/supabaseClient';
 
-const CONCURRENCY_LIMIT = 5;
+const CONCURRENCY_LIMIT = 15;
 const BATCH_SAVE_THRESHOLD = 1000; // Save to Supabase every N records
 const SYNC_PAUSE_SECONDS = 60;     // Pause duration in seconds before syncing
 
