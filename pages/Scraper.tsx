@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Play, Download, Pause, Activity, Terminal as TerminalIcon, 
-  AlertCircle, CheckCircle2, ShieldCheck, Zap, Lock, X, Info, Database 
+  AlertCircle, CheckCircle2, ShieldCheck, Zap, Lock, X, Info 
 } from 'lucide-react';
 import { CarrierData, ScraperConfig, User } from '../types';
 import { generateMockCarrier, scrapeRealCarrier, downloadCSV } from '../services/mockService';
+
+// --- ADDED IMPORT ---
 import { saveCarrierToSupabase } from '../services/supabaseClient';
 
 const CONCURRENCY_LIMIT = 5;
@@ -31,11 +33,11 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
   const [progress, setProgress] = useState(0);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [selectedCarrier, setSelectedCarrier] = useState<CarrierData | null>(null);
-  const [dbSaveCount, setDbSaveCount] = useState(0);
   
   const logsEndRef = useRef<HTMLDivElement>(null);
   const isRunningRef = useRef(false);
 
+  // Auto-scroll for terminal logs
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
@@ -53,9 +55,10 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
       setIsRunning(true);
       isRunningRef.current = true;
       setLogs(prev => [...prev, `🚀 Initializing High-Speed Scraper...`]);
+      setLogs(prev => [...prev, `Mode: ${config.useMockData ? 'Simulation' : config.useProxy ? 'Proxy Network' : 'Direct (VPN)'}`]);
+      setLogs(prev => [...prev, `Targeting ${config.recordCount} records starting at MC# ${config.startPoint}`]);
       setScrapedData([]);
       setProgress(0);
-      setDbSaveCount(0);
       processScrapingConcurrent();
     }
   };
@@ -76,7 +79,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
       if (initialUsed + sessionExtracted >= limit) {
         isRunningRef.current = false;
         setIsRunning(false);
-        setLogs(prev => [...prev, "⛔ DAILY LIMIT REACHED."]);
+        setLogs(prev => [...prev, "⛔ DAILY LIMIT REACHED: Upgrade to extract more."]);
         setShowUpgradeModal(true);
         return;
       }
@@ -84,8 +87,9 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
       let newData: CarrierData | null = null;
       try {
         if (config.useMockData) {
-          await new Promise(r => setTimeout(r, 150));
-          newData = generateMockCarrier(mc, config.includeBrokers);
+          await new Promise(r => setTimeout(r, 150)); // Simulated network lag
+          const isBroker = config.includeBrokers && (!config.includeCarriers || Math.random() > 0.5);
+          newData = generateMockCarrier(mc, isBroker);
         } else {
           newData = await scrapeRealCarrier(mc, config.useProxy);
         }
@@ -94,16 +98,6 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
       }
 
       if (newData) {
-        // --- DATA PARSING LOGIC FOR POWER UNITS, DRIVERS, MILEAGE ---
-        const raw = newData.rawContent || "";
-        const powerUnitsMatch = raw.match(/Power Units:\s*(\d+)/i);
-        const driversMatch = raw.match(/Drivers:\s*(\d+)/i);
-        const mileageMatch = raw.match(/([\d,]+)\s*\(\d{4}\)/i); // Extracts mileage before the year (2023)
-
-        newData.powerUnits = powerUnitsMatch ? parseInt(powerUnitsMatch[1]) : newData.powerUnits;
-        newData.drivers = driversMatch ? parseInt(driversMatch[1]) : newData.drivers;
-        newData.mileage = mileageMatch ? mileageMatch[1] : newData.mileage;
-
         const type = newData.entityType.toUpperCase();
         const isCarrier = type.includes('CARRIER');
         const isBroker = type.includes('BROKER');
@@ -117,19 +111,29 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
         }
 
         if (matchesFilter) {
+          // --- INTEGRATED SUPABASE SAVE LOGIC ---
+          setLogs(prev => [...prev, `[Sync] MC ${mc}: Sending to Cloud...`]);
+          
           try {
             const dbResponse = await saveCarrierToSupabase(newData);
+            
             if (dbResponse.success) {
-              setDbSaveCount(prev => prev + 1);
-              setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName} (Synced)`]);
+              setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName} (Saved to DB)`]);
               setScrapedData(prev => [...prev, newData!]);
               sessionExtracted++;
               onUpdateUsage(1);
+            } else {
+              setLogs(prev => [...prev, `[DB Error] MC ${mc}: ${dbResponse.error}`]);
+              // We still add to local UI even if DB fails, or you can skip it
+              setScrapedData(prev => [...prev, newData!]);
             }
-          } catch (dbErr) {
-            setLogs(prev => [...prev, `[DB Error] MC ${mc}`]);
+          } catch (dbErr: any) {
+            setLogs(prev => [...prev, `[Critical Error] MC ${mc}: ${dbErr.message}`]);
           }
+          // --- END INTEGRATION ---
         }
+      } else {
+        setLogs(prev => [...prev, `[Fail] MC ${mc} - No Data Found`]);
       }
 
       completed++;
@@ -143,11 +147,15 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
         activePromises.splice(activePromises.indexOf(p), 1);
       });
       activePromises.push(p);
-      if (activePromises.length >= CONCURRENCY_LIMIT) await Promise.race(activePromises);
+      if (activePromises.length >= CONCURRENCY_LIMIT) {
+        await Promise.race(activePromises);
+      }
     }
     await Promise.all(activePromises);
+
     setIsRunning(false);
     isRunningRef.current = false;
+    setLogs(prev => [...prev, "✅ Batch Job Complete."]);
   };
 
   return (
@@ -160,7 +168,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
             <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
               <div>
                 <h2 className="text-2xl font-bold text-white">{selectedCarrier.legalName}</h2>
-                <p className="text-slate-400 font-mono text-sm">MC# {selectedCarrier.mcNumber} | DOT# {selectedCarrier.dotNumber}</p>
+                <p className="text-slate-400 font-mono">MC# {selectedCarrier.mcNumber} | DOT# {selectedCarrier.dotNumber}</p>
               </div>
               <button onClick={() => setSelectedCarrier(null)} className="p-2 hover:bg-slate-700 rounded-full transition-colors">
                 <X size={24} />
@@ -168,30 +176,38 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
             </div>
             
             <div className="flex-1 overflow-y-auto p-6 space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 text-center">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Power Units</span>
-                  <div className="text-xl font-bold text-indigo-400">{selectedCarrier.powerUnits || '--'}</div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center">
+                  <span className="text-xs font-bold text-slate-500 uppercase mb-2 block">Safety Rating</span>
+                  <div className={`text-xl font-black px-4 py-2 rounded-lg inline-block ${
+                    selectedCarrier.safetyRating === 'SATISFACTORY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                  }`}>
+                    {selectedCarrier.safetyRating || 'UNRATED'}
+                  </div>
                 </div>
-                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 text-center">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Drivers</span>
-                  <div className="text-xl font-bold text-indigo-400">{selectedCarrier.drivers || '--'}</div>
+                <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center">
+                  <span className="text-xs font-bold text-slate-500 uppercase mb-2 block">Authority Status</span>
+                  <div className="text-sm font-bold text-blue-400 bg-blue-500/10 px-3 py-2 rounded-lg">
+                    {selectedCarrier.status}
+                  </div>
                 </div>
-                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 text-center">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Mileage / VMT</span>
-                  <div className="text-xl font-bold text-indigo-400">{selectedCarrier.mileage || '--'}</div>
-                </div>
-                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 text-center">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Status</span>
-                  <div className="text-xs font-bold text-green-400 truncate">{selectedCarrier.status}</div>
+                <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center">
+                  <span className="text-xs font-bold text-slate-500 uppercase mb-2 block">Contact</span>
+                  <div className="text-white text-sm truncate">{selectedCarrier.email || 'No Email'}</div>
+                  <div className="text-slate-400 text-xs mt-1">{selectedCarrier.phone}</div>
                 </div>
               </div>
 
-              <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
-                 <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2"><Info size={16}/> Raw Data Extraction</h3>
-                 <pre className="text-[10px] text-slate-400 whitespace-pre-wrap font-mono leading-tight">
-                    {selectedCarrier.rawContent}
-                 </pre>
+              <div>
+                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Activity size={20} className="text-indigo-400" /> BASIC Scores</h3>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {selectedCarrier.basicScores?.map((score, i) => (
+                    <div key={i} className="bg-slate-900/50 border border-slate-800 p-4 rounded-xl">
+                      <div className="text-[10px] font-bold text-slate-500 uppercase truncate" title={score.category}>{score.category}</div>
+                      <div className="text-lg font-mono text-white mt-1">{score.measure}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="p-6 border-t border-slate-700 bg-slate-800/50 flex justify-end">
@@ -208,6 +224,11 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
           <p className="text-slate-400">Automated FMCSA Extraction Engine</p>
         </div>
         <div className="flex gap-4">
+          {scrapedData.length > 0 && (
+            <button onClick={() => downloadCSV(scrapedData)} className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-medium transition-all">
+              <Download size={20} /> Export CSV
+            </button>
+          )}
           <button onClick={toggleRun} className={`flex items-center gap-2 px-8 py-3 rounded-xl font-bold transition-all shadow-lg ${isRunning ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}>
             {isRunning ? <><Pause size={20} /> Stop</> : <><Play size={20} /> Start Extraction</>}
           </button>
@@ -222,86 +243,74 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-1">Start MC Number</label>
-                <input type="text" value={config.startPoint} onChange={(e) => setConfig({...config, startPoint: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white outline-none focus:ring-2 focus:ring-indigo-500" disabled={isRunning} />
+                <input type="text" value={config.startPoint} onChange={(e) => setConfig({...config, startPoint: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none" disabled={isRunning} />
               </div>
-              
-              <div className="pt-2 space-y-3">
-                <label className="text-sm font-medium text-slate-400">Target Entities</label>
-                <div className="flex flex-col gap-3 bg-slate-900 p-4 rounded-xl border border-slate-700">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input type="checkbox" checked={config.includeCarriers} onChange={(e) => setConfig({...config, includeCarriers: e.target.checked})} className="w-4 h-4 rounded border-slate-600 text-indigo-600 bg-slate-800" disabled={isRunning} />
-                    <span className="text-sm text-slate-200">Carriers</span>
-                  </label>
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input type="checkbox" checked={config.includeBrokers} onChange={(e) => setConfig({...config, includeBrokers: e.target.checked})} className="w-4 h-4 rounded border-slate-600 text-indigo-600 bg-slate-800" disabled={isRunning} />
-                    <span className="text-sm text-slate-200">Brokers</span>
-                  </label>
-                  <label className="flex items-center gap-3 cursor-pointer border-t border-slate-700 pt-2 mt-1">
-                    <input type="checkbox" checked={config.onlyAuthorized} onChange={(e) => setConfig({...config, onlyAuthorized: e.target.checked})} className="w-4 h-4 rounded border-slate-600 text-indigo-600 bg-slate-800" disabled={isRunning} />
-                    <span className="text-sm text-slate-200">Only Authorized Status</span>
-                  </label>
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-1">Number of Records</label>
+                <input type="number" value={config.recordCount} onChange={(e) => setConfig({...config, recordCount: parseInt(e.target.value)})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none" disabled={isRunning} />
+              </div>
+              <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-sm text-white">Use Secure Proxy</span>
+                  <input type="checkbox" checked={config.useProxy} onChange={(e) => setConfig({...config, useProxy: e.target.checked})} className="w-4 h-4 rounded border-slate-600 text-indigo-600 bg-slate-900" disabled={isRunning} />
+                </label>
               </div>
             </div>
           </div>
 
           <div className="bg-slate-800/50 border border-slate-700 p-6 rounded-2xl">
-             <div className="flex justify-between text-sm mb-4">
-               <div className="flex flex-col">
-                 <span className="text-slate-400 text-xs uppercase">Supabase Sync</span>
-                 <span className="text-emerald-400 font-bold flex items-center gap-1"><Database size={12}/> {dbSaveCount} Saved</span>
-               </div>
-               <div className="text-right">
-                 <span className="text-slate-400 text-xs uppercase">Progress</span>
-                 <div className="text-white font-bold">{progress}%</div>
-               </div>
+             <div className="flex justify-between text-sm mb-2">
+               <span className="text-slate-400">Batch Progress</span>
+               <span className="text-white font-bold">{progress}%</span>
              </div>
-             <div className="w-full bg-slate-900 rounded-full h-2">
-               <div className="bg-indigo-500 h-2 rounded-full transition-all" style={{ width: `${progress}%` }}></div>
+             <div className="w-full bg-slate-900 rounded-full h-2.5">
+               <div className="bg-gradient-to-r from-indigo-500 to-purple-500 h-2.5 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
              </div>
           </div>
         </div>
 
         {/* 4. Terminal and Table */}
         <div className="col-span-12 lg:col-span-8 flex flex-col gap-6 h-full min-h-0">
-          <div className="flex-1 bg-slate-950 rounded-2xl border border-slate-800 font-mono text-[11px] p-4 overflow-y-auto custom-scrollbar relative">
-             <div className="sticky top-0 bg-slate-900/90 backdrop-blur p-2 border-b border-slate-800 flex items-center justify-between z-10 mb-2">
-                <div className="flex items-center gap-2 text-slate-400"><TerminalIcon size={14} /> Console</div>
-                {config.useProxy && <div className="text-green-500 flex items-center gap-1"><ShieldCheck size={12} /> Proxy Protected</div>}
+          <div className="flex-1 bg-slate-950 rounded-2xl border border-slate-800 font-mono text-sm p-4 overflow-y-auto custom-scrollbar relative">
+             <div className="sticky top-0 bg-slate-900/90 backdrop-blur p-2 border-b border-slate-800 flex items-center justify-between z-10">
+                <div className="flex items-center gap-2 text-slate-400 text-xs"><TerminalIcon size={14} /> System Console</div>
+                {config.useProxy && <div className="flex items-center gap-1 text-green-500 text-[10px]"><ShieldCheck size={12} /> Proxy Active</div>}
              </div>
-             {logs.map((log, i) => (
-               <div key={i} className={`pb-1 ${log.includes('[Success]') ? 'text-green-400' : 'text-slate-400'}`}>
-                 <span className="opacity-30 mr-2">{new Date().toLocaleTimeString()}</span>{log}
-               </div>
-             ))}
-             <div ref={logsEndRef} />
+             <div className="mt-4 space-y-1">
+               {logs.map((log, i) => (
+                 <div key={i} className={`pb-1 border-b border-slate-900/50 ${log.includes('[Success]') ? 'text-green-400' : log.includes('[Error]') || log.includes('[DB Error]') ? 'text-red-400' : log.includes('[Sync]') ? 'text-blue-400' : 'text-slate-300'}`}>
+                   <span className="opacity-30 mr-2 text-[10px]">{new Date().toLocaleTimeString()}</span>{log}
+                 </div>
+               ))}
+               <div ref={logsEndRef} />
+             </div>
           </div>
 
-          <div className="h-64 bg-slate-800/50 border border-slate-700 rounded-2xl overflow-hidden">
-             <table className="w-full text-left text-xs">
-               <thead className="bg-slate-900 text-slate-400 sticky top-0">
-                 <tr>
-                   <th className="p-3">MC#</th>
-                   <th className="p-3">Legal Name</th>
-                   <th className="p-3 text-center">Units</th>
-                   <th className="p-3 text-center">Drivers</th>
-                   <th className="p-3 text-right">Action</th>
-                 </tr>
-               </thead>
-               <tbody className="divide-y divide-slate-800">
-                 {scrapedData.slice().reverse().map((row, i) => (
-                   <tr key={i} className="hover:bg-slate-700/30">
-                     <td className="p-3 text-indigo-400 font-mono">{row.mcNumber}</td>
-                     <td className="p-3 text-slate-200 truncate max-w-[180px]">{row.legalName}</td>
-                     <td className="p-3 text-center text-slate-400">{row.powerUnits || '-'}</td>
-                     <td className="p-3 text-center text-slate-400">{row.drivers || '-'}</td>
-                     <td className="p-3 text-right">
-                       <button onClick={() => setSelectedCarrier(row)} className="text-indigo-400 hover:text-white transition-colors">Details</button>
-                     </td>
-                   </tr>
-                 ))}
-               </tbody>
-             </table>
+          <div className="h-64 bg-slate-800/50 border border-slate-700 rounded-2xl overflow-hidden flex flex-col">
+            <div className="flex-1 overflow-auto">
+              <table className="w-full text-left text-sm text-slate-400">
+                <thead className="bg-slate-900 text-slate-200 sticky top-0">
+                  <tr>
+                    <th className="p-3">MC#</th>
+                    <th className="p-3">Legal Name</th>
+                    <th className="p-3">Status</th>
+                    <th className="p-3">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {scrapedData.slice().reverse().map((row, i) => (
+                    <tr key={i} className="hover:bg-slate-700/50 group">
+                      <td className="p-3 font-mono text-white">{row.mcNumber}</td>
+                      <td className="p-3 truncate max-w-[200px]">{row.legalName}</td>
+                      <td className="p-3"><CheckCircle2 size={16} className="text-green-500" /></td>
+                      <td className="p-3">
+                        <button onClick={() => setSelectedCarrier(row)} className="text-xs text-indigo-400 font-bold">Details</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
