@@ -4,7 +4,6 @@ import { fetchCarrierFromBackend, fetchSafetyFromBackend, fetchInsuranceFromBack
 // === HELPER FUNCTIONS ===
 const cleanText = (text: string | null | undefined): string => {
   if (!text) return '';
-  // FIX: Replace newlines with spaces so the full address stays on one line in your CSV
   return text.replace(/\u00a0/g, ' ').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
 };
 
@@ -27,15 +26,9 @@ const findValueByLabel = (doc: Document, label: string): string => {
   const targetTh = ths.find(th => cleanText(th.textContent).includes(label));
   if (targetTh && targetTh.nextElementSibling) {
     const nextTd = targetTh.nextElementSibling;
-    
-    // FIX FOR ADDRESS & VERCEL BUILD:
-    // 1. Cast to HTMLElement to allow access to .innerText (fixing the build error)
-    // 2. Use .innerText instead of childNodes[0] to grab text after the <br> tag (fixing the missing city/zip)
     if (nextTd instanceof HTMLElement) {
       return cleanText(nextTd.innerText);
     }
-    
-    // Fallback if not an HTMLElement
     const val = nextTd.childNodes[0]?.textContent || nextTd.textContent;
     return cleanText(val);
   }
@@ -76,7 +69,7 @@ const fetchUrl = async (targetUrl: string, useProxy: boolean): Promise<string | 
   return null;
 };
 
-// === SCRAPER LOGIC (NOW USES BACKEND) ===
+// === SCRAPER LOGIC ===
 
 export const fetchSafetyData = async (dot: string): Promise<{ 
   rating: string, 
@@ -84,17 +77,13 @@ export const fetchSafetyData = async (dot: string): Promise<{
   basicScores: BasicScore[], 
   oosRates: OosRate[] 
 }> => {
-  // Try backend first
   const backendResult = await fetchSafetyFromBackend(dot);
-  if (backendResult) {
-    return backendResult;
-  }
+  if (backendResult) return backendResult;
 
-  // Fallback to old proxy method
   const url = `https://ai.fmcsa.dot.gov/SMS/Carrier/${dot}/CompleteProfile.aspx`;
   const html = await fetchUrl(url, true);
   
-  if (typeof html !== 'string') throw new Error("Could not fetch safety data");
+  if (typeof html !== 'string') return { rating: 'N/A', ratingDate: 'N/A', basicScores: [], oosRates: [] };
 
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
@@ -166,13 +155,9 @@ const fetchCarrierEmailFromSMS = async (dotNumber: string, useProxy: boolean): P
 };
 
 export const scrapeRealCarrier = async (mcNumber: string, useProxy: boolean): Promise<CarrierData | null> => {
-  // Try backend first
   const backendResult = await fetchCarrierFromBackend(mcNumber);
-  if (backendResult) {
-    return backendResult;
-  }
+  if (backendResult) return backendResult;
 
-  // Fallback to old proxy method
   const url = `https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=MC_MX&query_string=${mcNumber}`;
   const html = await fetchUrl(url, useProxy);
   if (typeof html !== 'string') return null;
@@ -217,24 +202,36 @@ export const scrapeRealCarrier = async (mcNumber: string, useProxy: boolean): Pr
     cargoCarried: findMarked("Cargo Carried"),
     outOfServiceDate: getVal('Out of Service Date:'),
     stateCarrierId: getVal('State Carrier ID Number:'),
-    dunsNumber: getVal('DUNS Number:')
+    dunsNumber: getVal('DUNS Number:'),
+    // Initialize rating fields
+    safetyRating: 'N/A',
+    ratingDate: 'N/A'
   };
 
-  if (carrier.dotNumber) {
-    carrier.email = await fetchCarrierEmailFromSMS(carrier.dotNumber, useProxy);
+  // ENRICHMENT: Fetch Email and Safety Data in Parallel for maximum speed
+  if (carrier.dotNumber && carrier.dotNumber !== '') {
+    try {
+      const [email, safety] = await Promise.all([
+        fetchCarrierEmailFromSMS(carrier.dotNumber, useProxy),
+        fetchSafetyData(carrier.dotNumber)
+      ]);
+      carrier.email = email;
+      carrier.safetyRating = safety.rating;
+      carrier.ratingDate = safety.ratingDate;
+      carrier.basicScores = safety.basicScores;
+      carrier.oosRates = safety.oosRates;
+    } catch (e) {
+      console.error("Enrichment failed for DOT", carrier.dotNumber);
+    }
   }
 
   return carrier;
 };
 
 export const fetchInsuranceData = async (dot: string): Promise<{policies: InsurancePolicy[], raw: any}> => {
-  // Try backend first
   const backendResult = await fetchInsuranceFromBackend(dot);
-  if (backendResult) {
-    return backendResult;
-  }
+  if (backendResult) return backendResult;
 
-  // Fallback to old proxy method
   const url = `https://searchcarriers.com/company/${dot}/insurances`;
   const result = await fetchUrl(url, true); 
 
@@ -243,18 +240,14 @@ export const fetchInsuranceData = async (dot: string): Promise<{policies: Insura
   
   if (Array.isArray(rawData)) {
     rawData.forEach((p: any) => {
-      const carrier = p.name_company || p.insurance_company || p.insurance_company_name || p.company_name || 'NOT SPECIFIED';
+      const carrierName = p.name_company || p.insurance_company || p.insurance_company_name || p.company_name || 'NOT SPECIFIED';
       const policyNumber = p.policy_no || p.policy_number || p.pol_num || 'N/A';
       const effectiveDate = p.effective_date ? p.effective_date.split(' ')[0] : 'N/A';
 
       let coverage = p.max_cov_amount || p.coverage_to || p.coverage_amount || 'N/A';
       if (coverage !== 'N/A' && !isNaN(Number(coverage))) {
         const num = Number(coverage);
-        if (num < 10000 && num > 0) {
-          coverage = `$${(num * 1000).toLocaleString()}`;
-        } else {
-          coverage = `$${num.toLocaleString()}`;
-        }
+        coverage = num < 10000 && num > 0 ? `$${(num * 1000).toLocaleString()}` : `$${num.toLocaleString()}`;
       }
 
       let type = (p.ins_type_code || 'N/A').toString();
@@ -268,7 +261,7 @@ export const fetchInsuranceData = async (dot: string): Promise<{policies: Insura
 
       extractedPolicies.push({
         dot,
-        carrier: carrier.toString().toUpperCase(),
+        carrier: carrierName.toString().toUpperCase(),
         policyNumber: policyNumber.toString().toUpperCase(),
         effectiveDate,
         coverageAmount: coverage.toString(),
@@ -282,11 +275,12 @@ export const fetchInsuranceData = async (dot: string): Promise<{policies: Insura
 };
 
 export const downloadCSV = (data: CarrierData[]) => {
-  const headers = ['MC', 'DOT', 'Legal Name', 'Email', 'Phone', 'Status', 'Physical Address', 'MCS-150 Date'];
+  const headers = ['MC', 'DOT', 'Legal Name', 'Safety Rating', 'Email', 'Phone', 'Status', 'Physical Address', 'MCS-150 Date'];
   const csvRows = data.map(row => [
     row.mcNumber,
     row.dotNumber,
     `"${row.legalName.replace(/"/g, '""')}"`,
+    row.safetyRating || 'N/A',
     row.email,
     row.phone,
     `"${row.status.replace(/"/g, '""')}"`,
@@ -329,5 +323,7 @@ export const generateMockCarrier = (mc: string, b: boolean): CarrierData => ({
   cargoCarried: [],
   outOfServiceDate: '',
   stateCarrierId: '',
-  dunsNumber: ''
+  dunsNumber: '',
+  safetyRating: 'Satisfactory',
+  ratingDate: '01/01/2024'
 });
