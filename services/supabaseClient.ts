@@ -4,8 +4,6 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('❌ Missing Supabase environment variables');
-  console.error('Required: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY');
   throw new Error('Missing Supabase environment variables');
 }
 
@@ -46,20 +44,10 @@ export interface CarrierRecord {
 }
 
 /**
- * Save a single carrier to Supabase with comprehensive error handling
+ * Save a single carrier to Supabase
  */
-export const saveCarrierToSupabase = async (
-  carrier: any
-): Promise<{ success: boolean; error?: string; data?: any }> => {
+export const saveCarrierToSupabase = async (carrier: any): Promise<{ success: boolean; error?: string }> => {
   try {
-    // Validate required fields
-    if (!carrier.mcNumber || !carrier.dotNumber || !carrier.legalName) {
-      return {
-        success: false,
-        error: 'Missing required fields: mcNumber, dotNumber, or legalName',
-      };
-    }
-
     const record: CarrierRecord = {
       mc_number: carrier.mcNumber,
       dot_number: carrier.dotNumber,
@@ -90,47 +78,38 @@ export const saveCarrierToSupabase = async (
       insurance_policies: carrier.insurancePolicies || null,
     };
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('carriers')
       .upsert(record, { onConflict: 'mc_number' });
 
     if (error) {
-      console.error('❌ Supabase save error:', error);
-      return {
-        success: false,
-        error: `Database error: ${error.message}`,
-      };
+      console.error('Supabase save error:', error);
+      return { success: false, error: error.message };
     }
 
-    console.log('✅ Carrier saved successfully:', carrier.mcNumber);
-    return { success: true, data };
+    return { success: true };
   } catch (err: any) {
-    console.error('❌ Exception saving to Supabase:', err);
-    return {
-      success: false,
-      error: `Exception: ${err.message}`,
-    };
+    console.error('Exception saving to Supabase:', err);
+    return { success: false, error: err.message };
   }
 };
 
 /**
- * Save multiple carriers in batch
+ * Save multiple carriers in batch (OPTIMIZED - parallel saves)
  */
 export const saveCarriersToSupabase = async (
   carriers: any[]
 ): Promise<{ success: boolean; error?: string; saved: number; failed: number }> => {
-  let saved = 0;
-  let failed = 0;
-
-  for (const carrier of carriers) {
-    const result = await saveCarrierToSupabase(carrier);
-    if (result.success) {
-      saved++;
-    } else {
-      failed++;
-      console.warn(`Failed to save carrier ${carrier.mcNumber}:`, result.error);
-    }
+  if (carriers.length === 0) {
+    return { success: true, saved: 0, failed: 0 };
   }
+
+  // Save all carriers in parallel (not sequential)
+  const promises = carriers.map(carrier => saveCarrierToSupabase(carrier));
+  const results = await Promise.all(promises);
+
+  const saved = results.filter(r => r.success).length;
+  const failed = results.filter(r => !r.success).length;
 
   return {
     success: failed === 0,
@@ -215,8 +194,6 @@ export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): P
       query = query.or('status.ilike.%NOT AUTHORIZED%,status.not.ilike.%AUTHORIZED%');
     }
     if (filters.state) {
-      // Correct syntax for OR with ILIKE in PostgREST when using special characters like commas:
-      // We must wrap the pattern in double quotes.
       const states = filters.state.split('|');
       const stateOrConditions = states.map(s => `physical_address.ilike."%, ${s}%"`).join(',');
       query = query.or(stateOrConditions);
@@ -262,7 +239,6 @@ export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): P
 
     // ── Insurance filters ──────────────────────────────────────────────────
     if (filters.insuranceRequired && filters.insuranceRequired.length > 0) {
-      // Filter by insurance type in the insurance_policies JSONB array
       const insuranceOrConditions = filters.insuranceRequired.map(type => `insurance_policies.cs.[{"type": "${type}"}]`).join(',');
       query = query.or(insuranceOrConditions);
     }
@@ -288,7 +264,7 @@ export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): P
     const { data, error } = await query;
 
     if (error) {
-      console.error('❌ Supabase fetch error:', error);
+      console.error('Supabase fetch error:', error);
       return [];
     }
 
@@ -322,124 +298,9 @@ export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): P
       insurancePolicies: record.insurance_policies,
     }));
 
-    // Post-fetch filtering for Years in Business (since mcs150_date is a string in various formats)
-    if (filters.yearsInBusinessMin !== undefined || filters.yearsInBusinessMax !== undefined) {
-      results = results.filter(carrier => {
-        if (!carrier.mcs150Date || carrier.mcs150Date === 'N/A') return false;
-        try {
-          const date = new Date(carrier.mcs150Date);
-          if (isNaN(date.getTime())) return false;
-          const diffMs = Date.now() - date.getTime();
-          const ageDate = new Date(diffMs);
-          const years = Math.abs(ageDate.getUTCFullYear() - 1970);
-          
-          if (filters.yearsInBusinessMin !== undefined && years < filters.yearsInBusinessMin) return false;
-          if (filters.yearsInBusinessMax !== undefined && years > filters.yearsInBusinessMax) return false;
-          return true;
-        } catch (e) {
-          return false;
-        }
-      });
-    }
-
     return results;
   } catch (err) {
-    console.error('❌ Exception fetching from Supabase:', err);
+    console.error('Exception fetching from Supabase:', err);
     return [];
-  }
-};
-
-/**
- * Delete carrier by MC number
- */
-export const deleteCarrier = async (
-  mcNumber: string
-): Promise<{ success: boolean; error?: string }> => {
-  try {
-    const { error } = await supabase
-      .from('carriers')
-      .delete()
-      .eq('mc_number', mcNumber);
-
-    if (error) {
-      console.error('❌ Supabase delete error:', error);
-      return { success: false, error: error.message };
-    }
-
-    console.log('✅ Carrier deleted:', mcNumber);
-    return { success: true };
-  } catch (err: any) {
-    console.error('❌ Exception deleting carrier:', err);
-    return { success: false, error: err.message };
-  }
-};
-
-/**
- * Get carrier count
- */
-export const getCarrierCount = async (): Promise<number> => {
-  try {
-    const { count, error } = await supabase
-      .from('carriers')
-      .select('*', { count: 'exact', head: true });
-
-    if (error) {
-      console.error('❌ Error getting carrier count:', error);
-      return 0;
-    }
-
-    return count || 0;
-  } catch (err) {
-    console.error('❌ Exception getting carrier count:', err);
-    return 0;
-  }
-};
-
-export const updateCarrierInsurance = async (dotNumber: string, insuranceData: any): Promise<{ success: boolean; error?: string }> => {
-  try {
-    const { error } = await supabase
-      .from('carriers')
-      .update({
-        insurance_policies: insuranceData.policies,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('dot_number', dotNumber);
-
-    if (error) {
-      console.error('❌ Supabase update error:', error);
-      return { success: false, error: error.message };
-    }
-
-    console.log('✅ Insurance data updated for DOT:', dotNumber);
-    return { success: true };
-  } catch (err: any) {
-    console.error('Exception updating Supabase:', err);
-    return { success: false, error: err.message };
-  }
-};
-
-export const updateCarrierSafety = async (dotNumber: string, safetyData: any): Promise<{ success: boolean; error?: string }> => {
-  try {
-    const { error } = await supabase
-      .from('carriers')
-      .update({
-        safety_rating: safetyData.rating,
-        safety_rating_date: safetyData.ratingDate,
-        basic_scores: safetyData.basicScores,
-        oos_rates: safetyData.oosRates,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('dot_number', dotNumber);
-
-    if (error) {
-      console.error('❌ Supabase safety update error:', error);
-      return { success: false, error: error.message };
-    }
-
-    console.log('✅ Safety data updated for DOT:', dotNumber);
-    return { success: true };
-  } catch (err: any) {
-    console.error('Exception updating safety data:', err);
-    return { success: false, error: err.message };
   }
 };
