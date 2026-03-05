@@ -61,7 +61,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
     }
   };
 
-  // Concurrent Processing Implementation
+  // Concurrent Processing Implementation.
   const processScrapingConcurrent = async () => {
     const start = parseInt(config.startPoint);
     const total = config.recordCount;
