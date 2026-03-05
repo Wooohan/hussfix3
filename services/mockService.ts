@@ -140,24 +140,18 @@ const getTextWithSpaces = (element: Element | null): string => {
   return text.replace(/\s+/g, ' ').trim();
 };
 
-// FIX 1: Always try direct fetch first (confirmed working via VPN + CORS extension).
-// Added 8s timeout so hung requests fail fast and free the worker slot.
-// Proxy fallback only runs if direct fetch fails.
 const fetchUrl = async (targetUrl: string, useProxy: boolean): Promise<string | null> => {
-  // Always try direct first
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    const response = await fetch(targetUrl, { signal: controller.signal });
-    clearTimeout(timer);
-    if (response.ok) {
-      const text = await response.text();
-      if (text && text.length > 200) return text;
+  if (!useProxy) {
+    try {
+      const response = await fetch(targetUrl);
+      if (response.ok) {
+        return await response.text();
+      }
+    } catch (error) {
+      console.warn("Direct fetch failed (likely CORS). Switching to fallback if available.", error);
+      return null;
     }
-  } catch (_) { /* fall through to proxy */ }
-
-  // Proxy fallback — only if direct fails and useProxy is enabled
-  if (!useProxy) return null;
+  }
 
   const proxyGenerators = [
     (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
@@ -167,22 +161,22 @@ const fetchUrl = async (targetUrl: string, useProxy: boolean): Promise<string | 
 
   for (const generateProxyUrl of proxyGenerators) {
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10000);
       const proxyUrl = generateProxyUrl(targetUrl);
-      const response = await fetch(proxyUrl, { signal: controller.signal });
-      clearTimeout(timer);
-
-      if (!response.ok) continue;
+      const response = await fetch(proxyUrl);
+      
+      if (!response.ok) {
+        continue;
+      }
 
       if (proxyUrl.includes('api.allorigins.win/get')) {
         const data = await response.json();
-        if (data.contents && data.contents.length > 200) return data.contents;
+        if (data.contents) return data.contents;
       } else {
         const text = await response.text();
-        if (text && text.length > 200) return text;
+        if (text && text.length > 0) return text;
       }
-    } catch (_) { /* try next proxy */ }
+    } catch (error) {
+    }
   }
   return null;
 };
@@ -304,7 +298,7 @@ const scrapeFmcsaComplete = async (dotNumber: string, useProxy: boolean) => {
       const cols = row.querySelectorAll('th, td');
       if (cols.length >= 3) {
         const type = cols[0].textContent?.trim() || '';
-        if (type && type !== 'Type') {
+        if (type && type !== 'Type') { // Skip header
           oosRates.push({
             type,
             oosPercent: cols[1].textContent?.trim() || '',
@@ -368,27 +362,26 @@ export const scrapeRealCarrier = async (mcNumber: string, useProxy: boolean): Pr
     return match && match[1] ? match[1].trim() : '';
   };
 
-  const legalName      = extract(/Legal Name:\s*(.*?)(?:DBA Name:|Physical Address:|$)/);
-  const dbaName        = extract(/DBA Name:\s*(.*?)(?:Physical Address:|$)/);
-  const physicalAddress= extract(/Physical Address:\s*(.*?)(?:Phone:|$)/);
-  const phone          = extract(/Phone:\s*(.*?)(?:Mailing Address:|$)/);
+  // Refined regex patterns to stop at the next logical label or end of line/section
+  const legalName = extract(/Legal Name:\s*(.*?)(?:DBA Name:|Physical Address:|$)/);
+  const dbaName = extract(/DBA Name:\s*(.*?)(?:Physical Address:|$)/);
+  const physicalAddress = extract(/Physical Address:\s*(.*?)(?:Phone:|$)/);
+  const phone = extract(/Phone:\s*(.*?)(?:Mailing Address:|$)/);
   const mailingAddress = extract(/Mailing Address:\s*(.*?)(?:USDOT Number:|$)/);
-  const dotNumber      = extract(/USDOT Number:\s*(.*?)(?:State Carrier ID Number:|$)/);
+  const dotNumber = extract(/USDOT Number:\s*(.*?)(?:State Carrier ID Number:|$)/);
   const stateCarrierId = extract(/State Carrier ID Number:\s*(.*?)(?:MC\/MX\/FF Number\(s\):|$)/);
-
-  // FIX 2: Simple digit-only capture — reliable regardless of what follows on the page
-  const powerUnits     = extract(/Power Units:\s*(\d+)/);
-  const drivers        = extract(/Drivers:\s*(\d+)/);
-
-  const mcs150Date     = extract(/MCS-150 Form Date:\s*(.*?)(?:MCS-150 Mileage|$)/);
-
-  // FIX 3: Stop mileage at OPERATING AUTHORITY (comes right after on the page),
-  // then strip the "/ VMT" prefix so we get just "20,000 (2025)"
-  const mcs150MileageRaw = extract(/MCS-150 Mileage[^:]*:\s*(.*?)(?:OPERATING AUTHORITY|Out of Service Date:|Operation Classification:|$)/);
-  const mcs150Mileage  = mcs150MileageRaw.replace(/^\s*\/\s*VMT\s*/i, '').trim();
-
+  
+  // Power Units and Drivers often have numbers, so we look for digits and stop before the next label
+  const powerUnits = extract(/Power Units:\s*(\d+)(?:\s*Non-CMV Units:|$)/);
+  const drivers = extract(/Drivers:\s*(\d+)(?:\s*MCS-150 Form Date:|$)/);
+  
+  const mcs150Date = extract(/MCS-150 Form Date:\s*(.*?)(?:MCS-150 Mileage \(Year\):|$)/);
+  
+  // Mileage often contains "(Year)" and we want to stop before "Operation Classification" or end of section
+  const mcs150Mileage = extract(/MCS-150 Mileage \(Year\):\s*(.*?)(?:Operation Classification:|$)/);
+  
   const outOfServiceDate = extract(/Out of Service Date:\s*(.*?)(?:Legal Name:|$)/);
-  const dunsNumber     = extract(/DUNS Number:\s*(.*?)(?:Power Units:|$)/);
+  const dunsNumber = extract(/DUNS Number:\s*(.*?)(?:Power Units:|$)/);
 
   const operationClassification = findMarkedLabels(doc, "Operation Classification");
   const carrierOperation = findMarkedLabels(doc, "Carrier Operation");
