@@ -4,7 +4,7 @@ import { Play, Download, Pause, Activity, Terminal as TerminalIcon, AlertCircle,
 import { CarrierData, ScraperConfig, User } from '../types';
 import { generateMockCarrier, scrapeRealCarrier, downloadCSV } from '../services/mockService';
 
-const CONCURRENCY_LIMIT = 5;
+const CONCURRENCY_LIMIT = 6;
 
 interface ScraperProps {
   user: User;
