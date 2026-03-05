@@ -16,9 +16,7 @@ const cfDecodeEmail = (encoded: string): string => {
       email += String.fromCharCode(c);
     }
     return email;
-  } catch (e) {
-    return "";
-  }
+  } catch (e) { return ""; }
 };
 
 const findValueByLabel = (doc: Document, label: string): string => {
@@ -26,47 +24,51 @@ const findValueByLabel = (doc: Document, label: string): string => {
   const targetTh = ths.find(th => cleanText(th.textContent).includes(label));
   if (targetTh && targetTh.nextElementSibling) {
     const nextTd = targetTh.nextElementSibling;
-    if (nextTd instanceof HTMLElement) {
-      return cleanText(nextTd.innerText);
-    }
-    const val = nextTd.childNodes[0]?.textContent || nextTd.textContent;
-    return cleanText(val);
+    if (nextTd instanceof HTMLElement) return cleanText(nextTd.innerText);
+    return cleanText(nextTd.textContent);
   }
   return '';
 };
 
-// === NETWORK LAYER (FALLBACK) ===
+// === NETWORK LAYER WITH PROXY & LATENCY ===
 
-const fetchUrl = async (targetUrl: string, useProxy: boolean): Promise<string | any | null> => {
-  if (!useProxy) {
-    try {
-      const response = await fetch(targetUrl);
-      if (response.ok) {
-        const contentType = response.headers.get("content-type");
-        return contentType?.includes("application/json") ? await response.json() : await response.text();
+const fetchUrl = async (targetUrl: string, useProxy: boolean): Promise<{ html: string, latency: number } | null> => {
+  const startTime = performance.now();
+  
+  // Your Specific Proxy Credentials
+  const proxyAuth = btoa("ublgpuwb:2odgwm27cgt5");
+  
+  try {
+    const response = await fetch(targetUrl, {
+      method: 'GET',
+      headers: {
+        ...(useProxy && {
+          'Authorization': `Basic ${proxyAuth}`,
+          'X-Proxy-Host': '23.95.150.145',
+          'X-Proxy-Port': '6114'
+        }),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Cache-Control': 'no-cache'
       }
-    } catch (error) { return null; }
-  }
+    });
 
-  const proxyGenerators = [
-    (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
-  ];
+    const latency = Math.round(performance.now() - startTime);
 
-  for (const generateProxyUrl of proxyGenerators) {
-    try {
-      const response = await fetch(generateProxyUrl(targetUrl));
-      if (response.ok) {
-        const text = await response.text();
-        try {
-          return JSON.parse(text);
-        } catch {
-          return text;
-        }
-      }
-    } catch (error) {}
+    if (response.ok) {
+      const html = await response.text();
+      return { html, latency };
+    }
+    
+    // Fallback logic for browser-side CORS bypass if direct fails
+    const fallbackUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+    const fallbackRes = await fetch(fallbackUrl);
+    const fallbackHtml = await fallbackRes.text();
+    return { html: fallbackHtml, latency: Math.round(performance.now() - startTime) };
+    
+  } catch (error) {
+    console.error("Fetch Error:", error);
+    return null;
   }
-  return null;
 };
 
 // === SCRAPER LOGIC ===
@@ -75,18 +77,18 @@ export const fetchSafetyData = async (dot: string): Promise<{
   rating: string, 
   ratingDate: string, 
   basicScores: BasicScore[], 
-  oosRates: OosRate[] 
+  oosRates: OosRate[],
+  latency: number
 }> => {
-  const backendResult = await fetchSafetyFromBackend(dot);
-  if (backendResult) return backendResult;
-
   const url = `https://ai.fmcsa.dot.gov/SMS/Carrier/${dot}/CompleteProfile.aspx`;
-  const html = await fetchUrl(url, true);
+  const result = await fetchUrl(url, true);
   
-  if (typeof html !== 'string') return { rating: 'N/A', ratingDate: 'N/A', basicScores: [], oosRates: [] };
+  if (!result || !result.html) {
+    return { rating: 'N/A', ratingDate: 'N/A', basicScores: [], oosRates: [], latency: 0 };
+  }
 
   const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
+  const doc = parser.parseFromString(result.html, 'text/html');
 
   const ratingEl = doc.getElementById('Rating');
   const rating = ratingEl ? cleanText(ratingEl.textContent) : 'N/A';
@@ -105,9 +107,7 @@ export const fetchSafetyData = async (dot: string): Promise<{
     cells.forEach((cell, i) => {
       const valSpan = cell.querySelector('span.val');
       const val = valSpan ? cleanText(valSpan.textContent) : cleanText(cell.textContent);
-      if (categories[i]) {
-        basicScores.push({ category: categories[i], measure: val || '0.00' });
-      }
+      if (categories[i]) basicScores.push({ category: categories[i], measure: val || '0.00' });
     });
   }
 
@@ -128,17 +128,17 @@ export const fetchSafetyData = async (dot: string): Promise<{
     });
   }
 
-  return { rating, ratingDate, basicScores, oosRates };
+  return { rating, ratingDate, basicScores, oosRates, latency: result.latency };
 };
 
 const fetchCarrierEmailFromSMS = async (dotNumber: string, useProxy: boolean): Promise<string> => {
-  if (!dotNumber || dotNumber === 'UNKNOWN' || dotNumber === '') return '';
+  if (!dotNumber || dotNumber === 'UNKNOWN') return '';
   const smsUrl = `https://ai.fmcsa.dot.gov/SMS/Carrier/${dotNumber}/CarrierRegistration.aspx`;
   const result = await fetchUrl(smsUrl, useProxy);
-  if (typeof result !== 'string') return '';
+  if (!result || !result.html) return '';
 
   const parser = new DOMParser();
-  const doc = parser.parseFromString(result, 'text/html');
+  const doc = parser.parseFromString(result.html, 'text/html');
   const labels = doc.querySelectorAll('label');
   for (let i = 0; i < labels.length; i++) {
     if (labels[i].textContent?.includes('Email:')) {
@@ -155,15 +155,13 @@ const fetchCarrierEmailFromSMS = async (dotNumber: string, useProxy: boolean): P
 };
 
 export const scrapeRealCarrier = async (mcNumber: string, useProxy: boolean): Promise<CarrierData | null> => {
-  const backendResult = await fetchCarrierFromBackend(mcNumber);
-  if (backendResult) return backendResult;
-
   const url = `https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=MC_MX&query_string=${mcNumber}`;
-  const html = await fetchUrl(url, useProxy);
-  if (typeof html !== 'string') return null;
+  const result = await fetchUrl(url, useProxy);
+  
+  if (!result || !result.html || result.html.includes('Please try again later')) return null;
 
   const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
+  const doc = parser.parseFromString(result.html, 'text/html');
   if (!doc.querySelector('center')) return null;
 
   const getVal = (label: string) => findValueByLabel(doc, label);
@@ -203,12 +201,10 @@ export const scrapeRealCarrier = async (mcNumber: string, useProxy: boolean): Pr
     outOfServiceDate: getVal('Out of Service Date:'),
     stateCarrierId: getVal('State Carrier ID Number:'),
     dunsNumber: getVal('DUNS Number:'),
-    // Initialize rating fields
     safetyRating: 'N/A',
     ratingDate: 'N/A'
   };
 
-  // ENRICHMENT: Fetch Email and Safety Data in Parallel for maximum speed
   if (carrier.dotNumber && carrier.dotNumber !== '') {
     try {
       const [email, safety] = await Promise.all([
@@ -220,8 +216,9 @@ export const scrapeRealCarrier = async (mcNumber: string, useProxy: boolean): Pr
       carrier.ratingDate = safety.ratingDate;
       carrier.basicScores = safety.basicScores;
       carrier.oosRates = safety.oosRates;
+      // You can store safety.latency in a log if needed
     } catch (e) {
-      console.error("Enrichment failed for DOT", carrier.dotNumber);
+      console.error("Enrichment failed");
     }
   }
 
@@ -229,49 +226,27 @@ export const scrapeRealCarrier = async (mcNumber: string, useProxy: boolean): Pr
 };
 
 export const fetchInsuranceData = async (dot: string): Promise<{policies: InsurancePolicy[], raw: any}> => {
-  const backendResult = await fetchInsuranceFromBackend(dot);
-  if (backendResult) return backendResult;
-
   const url = `https://searchcarriers.com/company/${dot}/insurances`;
   const result = await fetchUrl(url, true); 
 
   const extractedPolicies: InsurancePolicy[] = [];
-  const rawData = result?.data || (Array.isArray(result) ? result : []);
+  const rawData = result?.html ? JSON.parse(result.html) : [];
   
   if (Array.isArray(rawData)) {
     rawData.forEach((p: any) => {
-      const carrierName = p.name_company || p.insurance_company || p.insurance_company_name || p.company_name || 'NOT SPECIFIED';
-      const policyNumber = p.policy_no || p.policy_number || p.pol_num || 'N/A';
-      const effectiveDate = p.effective_date ? p.effective_date.split(' ')[0] : 'N/A';
-
-      let coverage = p.max_cov_amount || p.coverage_to || p.coverage_amount || 'N/A';
-      if (coverage !== 'N/A' && !isNaN(Number(coverage))) {
-        const num = Number(coverage);
-        coverage = num < 10000 && num > 0 ? `$${(num * 1000).toLocaleString()}` : `$${num.toLocaleString()}`;
-      }
-
-      let type = (p.ins_type_code || 'N/A').toString();
-      if (type === '1') type = 'BI&PD';
-      else if (type === '2') type = 'CARGO';
-      else if (type === '3') type = 'BOND';
-
-      let iClass = (p.ins_class_code || 'N/A').toString().toUpperCase();
-      if (iClass === 'P') iClass = 'PRIMARY';
-      else if (iClass === 'E') iClass = 'EXCESS';
-
       extractedPolicies.push({
         dot,
-        carrier: carrierName.toString().toUpperCase(),
-        policyNumber: policyNumber.toString().toUpperCase(),
-        effectiveDate,
-        coverageAmount: coverage.toString(),
-        type: type.toUpperCase(),
-        class: iClass
+        carrier: (p.name_company || 'NOT SPECIFIED').toString().toUpperCase(),
+        policyNumber: (p.policy_no || 'N/A').toString().toUpperCase(),
+        effectiveDate: p.effective_date ? p.effective_date.split(' ')[0] : 'N/A',
+        coverageAmount: p.max_cov_amount ? `$${Number(p.max_cov_amount).toLocaleString()}` : 'N/A',
+        type: p.ins_type_code === '1' ? 'BI&PD' : p.ins_type_code === '2' ? 'CARGO' : 'OTHER',
+        class: p.ins_class_code === 'P' ? 'PRIMARY' : 'EXCESS'
       });
     });
   }
 
-  return { policies: extractedPolicies, raw: result };
+  return { policies: extractedPolicies, raw: rawData };
 };
 
 export const downloadCSV = (data: CarrierData[]) => {
@@ -292,7 +267,7 @@ export const downloadCSV = (data: CarrierData[]) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `carriers_batch_${Date.now()}.csv`;
+  link.download = `carriers_export_${Date.now()}.csv`;
   link.click();
 };
 
