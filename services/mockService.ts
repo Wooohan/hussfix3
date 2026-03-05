@@ -89,12 +89,42 @@ const getTextWithSpaces = (element: Element | null): string => {
   return text.replace(/\s+/g, ' ').trim();
 };
 
-// Direct fetch — requires CORS extension + VPN (no proxy overhead)
+// Fetch with proxy fallback.
+// 1. Tries direct first (works with CORS extension + VPN).
+// 2. If that fails (mixed-content block: HTTPS page -> HTTP target), falls back to proxies.
 const fetchUrl = async (url: string): Promise<string | null> => {
+  // Direct attempt
   try {
     const res = await fetch(url, { headers: { 'Cache-Control': 'no-cache' } });
-    return res.ok ? await res.text() : null;
-  } catch { return null; }
+    if (res.ok) {
+      const text = await res.text();
+      if (text && text.length > 100) return text;
+    }
+  } catch { /* fall through */ }
+
+  // Proxy fallback (handles HTTPS->HTTP mixed content and CORS blocks)
+  const proxies = [
+    (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    (u: string) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+    (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  ];
+
+  for (const makeProxy of proxies) {
+    try {
+      const proxyUrl = makeProxy(url);
+      const res = await fetch(proxyUrl);
+      if (!res.ok) continue;
+      if (proxyUrl.includes('/get?')) {
+        const data = await res.json();
+        if (data?.contents && data.contents.length > 100) return data.contents;
+      } else {
+        const text = await res.text();
+        if (text && text.length > 100) return text;
+      }
+    } catch { /* try next */ }
+  }
+
+  return null;
 };
 
 const findMarkedLabels = (doc: Document, summary: string): string[] => {
