@@ -6,6 +6,9 @@ import {
 import { CarrierData, ScraperConfig, User } from '../types';
 import { generateMockCarrier, scrapeRealCarrier, downloadCSV } from '../services/mockService';
 
+// --- ADDED IMPORT ---
+import { saveCarrierToSupabase } from '../services/supabaseClient';
+
 const CONCURRENCY_LIMIT = 5;
 
 interface ScraperProps {
@@ -108,10 +111,26 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
         }
 
         if (matchesFilter) {
-          setScrapedData(prev => [...prev, newData!]);
-          setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName}`]);
-          sessionExtracted++;
-          onUpdateUsage(1);
+          // --- INTEGRATED SUPABASE SAVE LOGIC ---
+          setLogs(prev => [...prev, `[Sync] MC ${mc}: Sending to Cloud...`]);
+          
+          try {
+            const dbResponse = await saveCarrierToSupabase(newData);
+            
+            if (dbResponse.success) {
+              setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName} (Saved to DB)`]);
+              setScrapedData(prev => [...prev, newData!]);
+              sessionExtracted++;
+              onUpdateUsage(1);
+            } else {
+              setLogs(prev => [...prev, `[DB Error] MC ${mc}: ${dbResponse.error}`]);
+              // We still add to local UI even if DB fails, or you can skip it
+              setScrapedData(prev => [...prev, newData!]);
+            }
+          } catch (dbErr: any) {
+            setLogs(prev => [...prev, `[Critical Error] MC ${mc}: ${dbErr.message}`]);
+          }
+          // --- END INTEGRATION ---
         }
       } else {
         setLogs(prev => [...prev, `[Fail] MC ${mc} - No Data Found`]);
@@ -259,7 +278,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
              </div>
              <div className="mt-4 space-y-1">
                {logs.map((log, i) => (
-                 <div key={i} className={`pb-1 border-b border-slate-900/50 ${log.includes('[Success]') ? 'text-green-400' : log.includes('[Error]') ? 'text-red-400' : 'text-slate-300'}`}>
+                 <div key={i} className={`pb-1 border-b border-slate-900/50 ${log.includes('[Success]') ? 'text-green-400' : log.includes('[Error]') || log.includes('[DB Error]') ? 'text-red-400' : log.includes('[Sync]') ? 'text-blue-400' : 'text-slate-300'}`}>
                    <span className="opacity-30 mr-2 text-[10px]">{new Date().toLocaleTimeString()}</span>{log}
                  </div>
                ))}
