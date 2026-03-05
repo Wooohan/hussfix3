@@ -25,6 +25,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
     useMockData: false,
     useProxy: true,
   });
+  
   const [logs, setLogs] = useState<string[]>([]);
   const [scrapedData, setScrapedData] = useState<CarrierData[]>([]);
   const [progress, setProgress] = useState(0);
@@ -42,6 +43,12 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
     scrollToBottom();
   }, [logs]);
 
+  // Handle Download CSV
+  const handleDownload = () => {
+    if (scrapedData.length === 0) return;
+    downloadCSV(scrapedData);
+  };
+
   const toggleRun = () => {
     if (isRunning) {
       setIsRunning(false);
@@ -54,8 +61,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
       }
       setIsRunning(true);
       isRunningRef.current = true;
-      setLogs(prev => [...prev, `🚀 Initializing High-Speed Scraper...`]);
-      setLogs(prev => [...prev, `Targeting ${config.recordCount} records (Including Safety Ratings)`]);
+      setLogs(prev => [...prev, `🚀 Initializing Safety Scraper Engine...`]);
       setScrapedData([]);
       setProgress(0);
       setDbSaveCount(0);
@@ -68,8 +74,6 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
     const total = config.recordCount;
     let completed = 0;
     let sessionExtracted = 0;
-    const initialUsed = user.recordsExtractedToday;
-    const limit = user.dailyLimit;
     
     const tasks = Array.from({ length: total }, (_, i) => (start + i).toString());
     const successfulResults: CarrierData[] = [];
@@ -77,7 +81,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
     const worker = async (mc: string) => {
       if (!isRunningRef.current) return;
 
-      if (initialUsed + sessionExtracted >= limit) {
+      if (user.recordsExtractedToday + sessionExtracted >= user.dailyLimit) {
         isRunningRef.current = false;
         setIsRunning(false);
         setLogs(prev => [...prev, "⛔ DAILY LIMIT REACHED"]);
@@ -85,187 +89,226 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarr
         return;
       }
 
-      let newData: CarrierData | null = null;
       try {
+        let newData: CarrierData | null = null;
         if (config.useMockData) {
-           await new Promise(r => setTimeout(r, 100));
+           await new Promise(r => setTimeout(r, 150));
            newData = generateMockCarrier(mc, config.includeBrokers);
         } else {
-           // This function must now fetch Safety Ratings from the CompleteProfile URL
            newData = await scrapeRealCarrier(mc, config.useProxy);
         }
-      } catch (e) { /* silent fail */ }
 
-      if (newData) {
-         let matchesFilter = true;
-         if (config.onlyAuthorized && !newData.status.toUpperCase().includes('AUTHORIZED')) matchesFilter = false;
-
-         if (matchesFilter) {
-             setScrapedData(prev => [...prev, newData!]);
-             successfulResults.push(newData!);
-             
-             const saveResult = await saveCarrierToSupabase(newData!);
-             if (saveResult.success) {
-               setDbSaveCount(prev => prev + 1);
-               setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName} | Rating: ${newData!.safetyRating || 'N/A'}`]);
-             }
-             
-             sessionExtracted++;
-             onUpdateUsage(1);
-         }
+        if (newData) {
+          // Filter Logic
+          const matchesFilter = !config.onlyAuthorized || newData.status.toUpperCase().includes('AUTHORIZED');
+          
+          if (matchesFilter) {
+            setScrapedData(prev => [...prev, newData!]);
+            successfulResults.push(newData!);
+            
+            const saveResult = await saveCarrierToSupabase(newData!);
+            if (saveResult.success) {
+              setDbSaveCount(prev => prev + 1);
+              setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName} | Rating: ${newData!.safetyRating || 'N/A'}`]);
+            }
+            sessionExtracted++;
+            onUpdateUsage(1);
+          }
+        } else {
+          setLogs(prev => [...prev, `[No Data] MC ${mc} not found.`]);
+        }
+      } catch (e) {
+        setLogs(prev => [...prev, `[Error] MC ${mc}: Connection Failed.`]);
       }
 
       completed++;
       setProgress(Math.round((completed / total) * 100));
     };
 
+    // Concurrency Loop
     const activePromises: Promise<void>[] = [];
     for (const mc of tasks) {
       if (!isRunningRef.current) break;
-      const p = worker(mc).then(() => { activePromises.splice(activePromises.indexOf(p), 1); });
+      const p = worker(mc).then(() => {
+        activePromises.splice(activePromises.indexOf(p), 1);
+      });
       activePromises.push(p);
       if (activePromises.length >= CONCURRENCY_LIMIT) await Promise.race(activePromises);
     }
 
     await Promise.all(activePromises);
-    if (successfulResults.length > 0) onNewCarriers(successfulResults);
     setIsRunning(false);
     isRunningRef.current = false;
-    setLogs(prev => [...prev, `✅ Batch Complete. Extracted ${successfulResults.length} records.`]);
+    setLogs(prev => [...prev, `✅ Finished. Found ${successfulResults.length} matches.`]);
   };
 
   return (
-    <div className="p-8 h-screen flex flex-col overflow-hidden relative bg-slate-950 text-slate-200">
+    <div className="flex flex-col h-screen w-full bg-slate-950 text-slate-200 overflow-hidden font-sans">
       
-      {/* Upgrade Modal */}
+      {/* Modal for Limits */}
       {showUpgradeModal && (
-        <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="bg-slate-800 border border-slate-700 p-8 rounded-2xl max-w-md text-center">
-              <Lock className="mx-auto mb-4 text-indigo-400" size={48} />
-              <h2 className="text-2xl font-bold mb-2">Daily Limit Reached</h2>
-              <button onClick={() => setShowUpgradeModal(false)} className="mt-4 px-6 py-2 bg-indigo-600 rounded-lg">Close</button>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 p-8 rounded-3xl max-w-sm text-center shadow-2xl">
+            <Lock className="mx-auto mb-4 text-indigo-400" size={48} />
+            <h2 className="text-2xl font-bold text-white mb-2">Limit Reached</h2>
+            <p className="text-slate-400 mb-6 text-sm">Upgrade your plan to unlock more extractions per day.</p>
+            <button onClick={onUpgrade} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-bold transition-all">View Plans</button>
+            <button onClick={() => setShowUpgradeModal(false)} className="mt-2 text-slate-500 text-xs uppercase tracking-widest">Dismiss</button>
           </div>
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Safety Scraper Pro</h1>
-          <p className="text-slate-400 text-sm">Extracting FMCSA MC Data & Safety Ratings</p>
-        </div>
-        <div className="flex gap-3">
-          <button onClick={handleDownload} className="px-4 py-2 bg-slate-800 rounded-xl flex items-center gap-2 hover:bg-slate-700">
-            <Download size={18} /> Export
-          </button>
-          <button onClick={toggleRun} className={`px-6 py-2 rounded-xl font-bold flex items-center gap-2 ${isRunning ? 'bg-red-500' : 'bg-indigo-600'}`}>
-            {isRunning ? <Pause size={18} /> : <Play size={18} />} {isRunning ? 'Stop' : 'Start'}
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
+      {/* Main Container */}
+      <div className="flex flex-col flex-1 p-6 md:p-10 space-y-6 min-h-0">
         
-        {/* Config Sidebar */}
-        <div className="col-span-4 space-y-4 overflow-y-auto pr-2">
-          <div className="bg-slate-800/40 border border-slate-800 p-5 rounded-2xl space-y-4">
-            <h2 className="text-sm font-bold uppercase text-slate-500 tracking-widest">Parameters</h2>
-            <input type="text" value={config.startPoint} onChange={(e) => setConfig({...config, startPoint: e.target.value})} className="w-full bg-slate-900 border-slate-700 rounded-lg p-2" placeholder="Start MC" />
-            <input type="number" value={config.recordCount} onChange={(e) => setConfig({...config, recordCount: parseInt(e.target.value)})} className="w-full bg-slate-900 border-slate-700 rounded-lg p-2" />
-            
-            <div className="pt-2 space-y-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={config.onlyAuthorized} onChange={(e) => setConfig({...config, onlyAuthorized: e.target.checked})} />
-                Only Authorized
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={config.useProxy} onChange={(e) => setConfig({...config, useProxy: e.target.checked})} />
-                Secure Proxy Network
-              </label>
-            </div>
+        {/* Top Header */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-3xl font-black text-white tracking-tight italic">SMS<span className="text-indigo-500 font-normal not-italic">Scraper</span></h1>
+            <p className="text-slate-400 text-xs font-medium uppercase tracking-widest">FMCSA Safety Rating Engine</p>
           </div>
-
-          {/* Progress Card */}
-          <div className="bg-slate-800/40 border border-slate-800 p-5 rounded-2xl">
-            <div className="flex justify-between text-xs mb-2 text-slate-400 font-bold uppercase">
-              <span>Progress</span>
-              <span>{progress}%</span>
-            </div>
-            <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden">
-              <div className="bg-indigo-500 h-full transition-all duration-500" style={{ width: `${progress}%` }} />
-            </div>
-            <div className="mt-4 flex justify-between items-end">
-               <div>
-                 <p className="text-[10px] text-slate-500 uppercase font-black">Saved to DB</p>
-                 <p className="text-xl font-mono text-emerald-400">{dbSaveCount}</p>
-               </div>
-               <div className="text-right">
-                 <p className="text-[10px] text-slate-500 uppercase font-black">Limit</p>
-                 <p className="text-sm text-slate-300">{user.recordsExtractedToday} / {user.dailyLimit}</p>
-               </div>
-            </div>
+          <div className="flex gap-3 w-full md:w-auto">
+            <button onClick={handleDownload} className="flex-1 md:flex-none px-5 py-3 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-800 transition-all text-sm font-bold">
+              <Download size={18} /> Export
+            </button>
+            <button onClick={toggleRun} className={`flex-1 md:flex-none px-8 py-3 rounded-2xl font-black flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/10 transition-all ${isRunning ? 'bg-red-500 hover:bg-red-600' : 'bg-indigo-600 hover:bg-indigo-500'}`}>
+              {isRunning ? <><Pause size={18} /> STOP</> : <><Play size={18} /> START</>}
+            </button>
           </div>
         </div>
 
-        {/* Output Area */}
-        <div className="col-span-8 flex flex-col gap-4 min-h-0">
-          {/* Console */}
-          <div className="flex-[2] bg-black border border-slate-800 rounded-2xl p-4 font-mono text-[12px] overflow-y-auto relative">
-            <div className="sticky top-0 bg-black/80 backdrop-blur pb-2 mb-2 border-b border-slate-900 flex items-center gap-2 text-slate-500">
-               <TerminalIcon size={14} /> System Console
-            </div>
-            {logs.map((log, i) => (
-              <div key={i} className={`mb-1 ${log.includes('Success') ? 'text-emerald-400' : 'text-slate-400'}`}>
-                <span className="opacity-30 mr-2">[{new Date().toLocaleTimeString()}]</span> {log}
+        <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
+          
+          {/* Left: Configuration */}
+          <div className="col-span-12 lg:col-span-4 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar">
+            
+            <section className="bg-slate-900/50 border border-slate-800 p-6 rounded-3xl space-y-5">
+              <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm uppercase tracking-wider">
+                <Activity size={16} /> Parameters
               </div>
-            ))}
-            <div ref={logsEndRef} />
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">Start MC#</label>
+                  <input type="text" value={config.startPoint} onChange={(e) => setConfig({...config, startPoint: e.target.value})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 focus:border-indigo-500 outline-none transition-all" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">Batch Size</label>
+                  <input type="number" value={config.recordCount} onChange={(e) => setConfig({...config, recordCount: parseInt(e.target.value)})} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 focus:border-indigo-500 outline-none transition-all" />
+                </div>
+                <div className="flex flex-col gap-3 pt-2">
+                  <label className="flex items-center justify-between group cursor-pointer">
+                    <span className="text-sm text-slate-300">Only Authorized Status</span>
+                    <input type="checkbox" checked={config.onlyAuthorized} onChange={(e) => setConfig({...config, onlyAuthorized: e.target.checked})} className="w-5 h-5 rounded-lg border-slate-800 bg-slate-950 text-indigo-600" />
+                  </label>
+                  <label className="flex items-center justify-between group cursor-pointer">
+                    <span className="text-sm text-slate-300">Use Secure Proxies</span>
+                    <input type="checkbox" checked={config.useProxy} onChange={(e) => setConfig({...config, useProxy: e.target.checked})} className="w-5 h-5 rounded-lg border-slate-800 bg-slate-950 text-indigo-600" />
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            {/* Stats Card */}
+            <section className="bg-indigo-600 p-6 rounded-3xl shadow-xl shadow-indigo-500/10">
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <p className="text-indigo-200 text-[10px] font-black uppercase tracking-widest">Active Progress</p>
+                  <h3 className="text-3xl font-black text-white">{progress}%</h3>
+                </div>
+                <Database className="text-indigo-300/50" size={32} />
+              </div>
+              <div className="w-full bg-indigo-800 h-2 rounded-full mb-6 overflow-hidden">
+                <div className="bg-white h-full transition-all duration-700" style={{ width: `${progress}%` }} />
+              </div>
+              <div className="grid grid-cols-2 gap-4 border-t border-indigo-500 pt-4">
+                <div>
+                  <p className="text-indigo-200 text-[10px] font-bold uppercase">DB Saves</p>
+                  <p className="text-white font-black">{dbSaveCount}</p>
+                </div>
+                <div>
+                  <p className="text-indigo-200 text-[10px] font-bold uppercase">Usage</p>
+                  <p className="text-white font-black">{user.recordsExtractedToday}/{user.dailyLimit}</p>
+                </div>
+              </div>
+            </section>
           </div>
 
-          {/* Table Preview */}
-          <div className="flex-[3] bg-slate-900/50 border border-slate-800 rounded-2xl overflow-hidden flex flex-col">
-            <div className="p-3 bg-slate-800/50 border-b border-slate-800 text-xs font-bold uppercase tracking-tighter text-slate-400 flex justify-between">
-              <span>Live Results</span>
-              <span>{scrapedData.length} records</span>
+          {/* Right: Console and Data */}
+          <div className="col-span-12 lg:col-span-8 flex flex-col gap-6 min-h-0">
+            
+            {/* Terminal Console */}
+            <div className="flex-[1] bg-slate-950 border border-slate-800 rounded-3xl p-5 font-mono text-[11px] overflow-y-auto relative custom-scrollbar">
+              <div className="sticky top-0 bg-slate-950/90 backdrop-blur pb-3 mb-3 border-b border-slate-900 flex items-center justify-between">
+                 <div className="flex items-center gap-2 text-slate-500 font-bold uppercase tracking-widest">
+                   <TerminalIcon size={14} /> System Console
+                 </div>
+                 <div className="flex gap-2">
+                   <div className="w-2 h-2 rounded-full bg-red-500/50"></div>
+                   <div className="w-2 h-2 rounded-full bg-yellow-500/50"></div>
+                   <div className="w-2 h-2 rounded-full bg-green-500/50"></div>
+                 </div>
+              </div>
+              <div className="space-y-1">
+                {logs.length === 0 && <span className="text-slate-800 italic">No activity logs...</span>}
+                {logs.map((log, i) => (
+                  <div key={i} className={`flex gap-3 ${log.includes('Success') ? 'text-indigo-400' : 'text-slate-500'}`}>
+                    <span className="opacity-20 shrink-0">{new Date().toLocaleTimeString()}</span>
+                    <span>{log}</span>
+                  </div>
+                ))}
+                <div ref={logsEndRef} />
+              </div>
             </div>
-            <div className="overflow-auto flex-1">
-              <table className="w-full text-[11px] text-left border-collapse">
-                <thead className="bg-slate-900 sticky top-0 text-slate-500">
-                  <tr>
-                    <th className="p-3">MC#</th>
-                    <th className="p-3">Legal Name</th>
-                    <th className="p-3 text-indigo-400"><ShieldAlert size={12} className="inline mr-1"/>Safety Rating</th>
-                    <th className="p-3">Rating Date</th>
-                    <th className="p-3">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {scrapedData.length === 0 ? (
-                    <tr><td colSpan={5} className="p-10 text-center text-slate-600">No data in current session.</td></tr>
-                  ) : (
-                    scrapedData.slice().reverse().map((row, i) => (
-                      <tr key={i} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="p-3 font-mono text-indigo-300">{row.mcNumber}</td>
-                        <td className="p-3 font-bold text-slate-300 truncate max-w-[150px]">{row.legalName}</td>
-                        <td className="p-3">
-                          <span className={`px-2 py-0.5 rounded-full font-bold ${
-                            row.safetyRating === 'Satisfactory' ? 'bg-emerald-500/10 text-emerald-400' : 
-                            row.safetyRating === 'Conditional' ? 'bg-yellow-500/10 text-yellow-400' : 
-                            'bg-slate-800 text-slate-500'
-                          }`}>
-                            {row.safetyRating || 'NOT RATED'}
-                          </span>
-                        </td>
-                        <td className="p-3 text-slate-500">{row.ratingDate || '-'}</td>
-                        <td className="p-3">
-                          {row.status.includes('AUTHORIZED') ? <span className="text-emerald-500">●</span> : <span className="text-red-500">●</span>}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+
+            {/* Live Table Preview */}
+            <div className="flex-[2] bg-slate-900/30 border border-slate-800 rounded-3xl overflow-hidden flex flex-col min-h-0">
+              <div className="p-4 bg-slate-900/50 border-b border-slate-800 flex justify-between items-center">
+                <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Live Data Feed</h3>
+                <span className="bg-indigo-500/10 text-indigo-400 text-[10px] px-2 py-1 rounded-full font-bold">{scrapedData.length} Found</span>
+              </div>
+              <div className="overflow-auto flex-1 custom-scrollbar">
+                <table className="w-full text-[11px] text-left">
+                  <thead className="bg-slate-950/50 sticky top-0 text-slate-500 font-bold uppercase tracking-tighter border-b border-slate-800">
+                    <tr>
+                      <th className="p-4">MC#</th>
+                      <th className="p-4">Carrier Name</th>
+                      <th className="p-4 text-indigo-400"><ShieldAlert size={12} className="inline mb-0.5 mr-1"/>Safety Rating</th>
+                      <th className="p-4">Rating Date</th>
+                      <th className="p-4 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {scrapedData.length === 0 ? (
+                      <tr><td colSpan={5} className="p-20 text-center text-slate-700 italic">No records captured in this session.</td></tr>
+                    ) : (
+                      scrapedData.slice().reverse().map((row, i) => (
+                        <tr key={i} className="hover:bg-indigo-500/[0.03] transition-colors border-b border-slate-800/30">
+                          <td className="p-4 font-mono text-indigo-400">{row.mcNumber}</td>
+                          <td className="p-4 font-bold text-slate-200 truncate max-w-[200px]">{row.legalName}</td>
+                          <td className="p-4">
+                            <span className={`px-2 py-1 rounded-lg font-black text-[9px] uppercase ${
+                              row.safetyRating === 'Satisfactory' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 
+                              row.safetyRating === 'Conditional' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' : 
+                              'bg-slate-800/50 text-slate-500'
+                            }`}>
+                              {row.safetyRating || 'NOT RATED'}
+                            </span>
+                          </td>
+                          <td className="p-4 text-slate-500 font-mono">{row.ratingDate || '—'}</td>
+                          <td className="p-4 text-center">
+                            {row.status.includes('AUTHORIZED') ? 
+                              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span> : 
+                              <span className="inline-block w-2 h-2 rounded-full bg-red-500"></span>
+                            }
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
+
           </div>
         </div>
       </div>
