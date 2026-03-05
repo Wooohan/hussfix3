@@ -85,7 +85,7 @@ export const Scraper: React.FC<ScraperProps> = ({
 
     setLogs(prev => [
       ...prev,
-      '🚀 Initializing High-Speed Scraper...',
+      '🚀 Initializing High-Speed Scraper....',
       `Mode: ${config.useMockData ? 'Simulation' : config.useProxy ? 'Proxy Network' : 'Direct (VPN)'}`,
       `Targeting ${config.recordCount} records starting at MC# ${config.startPoint}`,
       '💾 Supabase integration: Batch Mode'
