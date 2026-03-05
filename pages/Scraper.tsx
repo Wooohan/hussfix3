@@ -1,22 +1,8 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import {
-  Play,
-  Download,
-  Pause,
-  Activity,
-  Terminal as TerminalIcon,
-  AlertCircle,
-  CheckCircle2,
-  ShieldCheck,
-  Zap,
-  Lock,
-  Database
-} from 'lucide-react';
-
+import { Play, Download, Pause, Activity, Terminal as TerminalIcon, AlertCircle, CheckCircle2, ShieldCheck, Zap, Lock, Database, X, Info } from 'lucide-react';
 import { CarrierData, ScraperConfig, User } from '../types';
 import { generateMockCarrier, scrapeRealCarrier, downloadCSV } from '../services/mockService';
-import { saveBatchToSupabase } from '../services/supabaseClient';
+import { saveCarrierToSupabase } from '../services/supabaseClient';
 
 const CONCURRENCY_LIMIT = 5;
 
@@ -26,15 +12,8 @@ interface ScraperProps {
   onUpgrade: () => void;
 }
 
-export const Scraper: React.FC<ScraperProps> = ({
-  user,
-  onUpdateUsage,
-  onUpgrade
-}) => {
-
+export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade }) => {
   const [isRunning, setIsRunning] = useState(false);
-  const [dbSaveCount, setDbSaveCount] = useState(0);
-
   const [config, setConfig] = useState<ScraperConfig>({
     startPoint: '1580000',
     recordCount: 50,
@@ -42,20 +21,19 @@ export const Scraper: React.FC<ScraperProps> = ({
     includeBrokers: false,
     onlyAuthorized: true,
     useMockData: false,
-    useProxy: true,
+    useProxy: true, // Default to using proxy
   });
-
   const [logs, setLogs] = useState<string[]>([]);
   const [scrapedData, setScrapedData] = useState<CarrierData[]>([]);
   const [progress, setProgress] = useState(0);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [selectedCarrier, setSelectedCarrier] = useState<CarrierData | null>(null);
-
+  
   const logsEndRef = useRef<HTMLDivElement>(null);
   const isRunningRef = useRef(false);
 
   const scrollToBottom = () => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
@@ -66,120 +44,109 @@ export const Scraper: React.FC<ScraperProps> = ({
     if (isRunning) {
       setIsRunning(false);
       isRunningRef.current = false;
-      setLogs(prev => [...prev, '⚠️ Process paused by user.']);
-      return;
+      setLogs(prev => [...prev, "⚠️ Process paused by user."]);
+    } else {
+      if (user.recordsExtractedToday >= user.dailyLimit) {
+        setShowUpgradeModal(true);
+        return;
+      }
+      setIsRunning(true);
+      isRunningRef.current = true;
+      setLogs(prev => [...prev, `🚀 Initializing High-Speed Scraper...`]);
+      setLogs(prev => [...prev, `Mode: ${config.useMockData ? 'Simulation' : config.useProxy ? 'Proxy Network' : 'Direct (VPN)'}`]);
+      setLogs(prev => [...prev, `Targeting ${config.recordCount} records starting at MC# ${config.startPoint}`]);
+      setScrapedData([]);
+      setProgress(0);
+      processScrapingConcurrent();
     }
-
-    if (user.recordsExtractedToday >= user.dailyLimit) {
-      setShowUpgradeModal(true);
-      return;
-    }
-
-    setIsRunning(true);
-    isRunningRef.current = true;
-
-    setLogs([]);
-    setScrapedData([]);
-    setProgress(0);
-    setDbSaveCount(0);
-
-    setLogs(prev => [
-      ...prev,
-      '🚀 Initializing High-Speed Scraper....',
-      `Mode: ${config.useMockData ? 'Simulation' : config.useProxy ? 'Proxy Network' : 'Direct (VPN)'}`,
-      `Targeting ${config.recordCount} records starting at MC# ${config.startPoint}`,
-      '💾 Supabase integration: Batch Mode'
-    ]);
-
-    processScrapingConcurrent();
   };
 
+  // Concurrent Processing Implementation.
   const processScrapingConcurrent = async () => {
     const start = parseInt(config.startPoint);
     const total = config.recordCount;
     let completed = 0;
-
+    
+    // Track usage locally for this session to handle closure state
     let sessionExtracted = 0;
     const initialUsed = user.recordsExtractedToday;
     const limit = user.dailyLimit;
-
-    const tasks = Array.from({ length: total }, (_, i) =>
-      (start + i).toString()
-    );
-
-    const batchResults: CarrierData[] = [];
+    
+    // Create an array of tasks
+    const tasks = Array.from({ length: total }, (_, i) => (start + i).toString());
 
     const worker = async (mc: string) => {
       if (!isRunningRef.current) return;
 
+      // Check limit before processing
       if (initialUsed + sessionExtracted >= limit) {
         isRunningRef.current = false;
         setIsRunning(false);
-        setLogs(prev => [...prev, '⛔ DAILY LIMIT REACHED']);
+        setLogs(prev => [...prev, "⛔ DAILY LIMIT REACHED: Upgrade to extract more."]);
         setShowUpgradeModal(true);
         return;
       }
 
       let newData: CarrierData | null = null;
-
       try {
         if (config.useMockData) {
-          await new Promise(r => setTimeout(r, 100));
-          const isBroker =
-            config.includeBrokers &&
-            (!config.includeCarriers || Math.random() > 0.5);
-          newData = generateMockCarrier(mc, isBroker);
+           await new Promise(r => setTimeout(r, 100));
+           const isBroker = config.includeBrokers && (!config.includeCarriers || Math.random() > 0.5);
+           newData = generateMockCarrier(mc, isBroker);
         } else {
-          newData = await scrapeRealCarrier(mc, config.useProxy);
+           // No artificial delay for maximum speed
+           newData = await scrapeRealCarrier(mc, config.useProxy);
         }
-      } catch (err) {}
+      } catch (e) {
+        // Silent fail or log
+      }
 
+      // Filter Logic
       if (newData) {
-        let matchesFilter = true;
+         let matchesFilter = true;
+         const type = newData.entityType.toUpperCase();
+         const isCarrier = type.includes('CARRIER');
+         const isBroker = type.includes('BROKER');
+         const status = newData.status.toUpperCase();
 
-        const type = newData.entityType?.toUpperCase() || '';
-        const isCarrier = type.includes('CARRIER');
-        const isBroker = type.includes('BROKER');
-        const status = newData.status?.toUpperCase() || '';
+         if (!config.includeCarriers && isCarrier && !isBroker) matchesFilter = false;
+         if (!config.includeBrokers && isBroker && !isCarrier) matchesFilter = false;
+         
+         if (config.onlyAuthorized) {
+             // Strict Check: Must include AUTHORIZED and MUST NOT include NOT AUTHORIZED
+             if (status.includes('NOT AUTHORIZED') || !status.includes('AUTHORIZED')) {
+                 matchesFilter = false;
+             }
+         }
 
-        if (!config.includeCarriers && isCarrier && !isBroker) matchesFilter = false;
-        if (!config.includeBrokers && isBroker && !isCarrier) matchesFilter = false;
-
-        if (config.onlyAuthorized) {
-          if (status.includes('NOT AUTHORIZED') || !status.includes('AUTHORIZED')) {
-            matchesFilter = false;
-          }
-        }
-
-        if (matchesFilter) {
-          setScrapedData(prev => [...prev, newData!]);
-          batchResults.push(newData!);
-
-          sessionExtracted++;
-          onUpdateUsage(1);
-
-          setLogs(prev => [
-            ...prev,
-            `[Success] MC ${mc}: ${newData.legalName}`
-          ]);
-        }
+         if (matchesFilter) {
+             setScrapedData(prev => [...prev, newData!]);
+             setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName}`]);
+             
+             // Increment usage
+             sessionExtracted++;
+             onUpdateUsage(1);
+         } else {
+            // Optional: Reduce log noise for speed
+            // setLogs(prev => [...prev, `[Skipped] MC ${mc}`]);
+         }
       } else {
-        setLogs(prev => [...prev, `[Fail] MC ${mc} - No Data`]);
+         setLogs(prev => [...prev, `[Fail] MC ${mc} - No Data`]);
       }
 
       completed++;
       setProgress(Math.round((completed / total) * 100));
     };
 
+    // Execute with concurrency limit
     const activePromises: Promise<void>[] = [];
-
+    
     for (const mc of tasks) {
       if (!isRunningRef.current) break;
 
       const p = worker(mc).then(() => {
         activePromises.splice(activePromises.indexOf(p), 1);
       });
-
       activePromises.push(p);
 
       if (activePromises.length >= CONCURRENCY_LIMIT) {
@@ -191,33 +158,7 @@ export const Scraper: React.FC<ScraperProps> = ({
 
     setIsRunning(false);
     isRunningRef.current = false;
-
-    setLogs(prev => [...prev, '✅ Scraping Complete.']);
-
-    // 🔥 BULK SAVE AFTER SCRAPING
-    if (batchResults.length > 0) {
-      setLogs(prev => [
-        ...prev,
-        `💾 Saving ${batchResults.length} records to Supabase...`
-      ]);
-
-      const saveResult = await saveBatchToSupabase(batchResults);
-
-      if (saveResult.success) {
-        setDbSaveCount(batchResults.length);
-        setLogs(prev => [
-          ...prev,
-          `✅ ${batchResults.length} records saved successfully.`
-        ]);
-      } else {
-        setLogs(prev => [
-          ...prev,
-          `❌ Batch save failed: ${saveResult.error}`
-        ]);
-      }
-    } else {
-      setLogs(prev => [...prev, '⚠️ No records to save.']);
-    }
+    setLogs(prev => [...prev, "✅ Batch Job Complete."]);
   };
 
   const handleDownload = () => {
