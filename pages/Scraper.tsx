@@ -1,8 +1,8 @@
+
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Download, Pause, Activity, Terminal as TerminalIcon, AlertCircle, CheckCircle2, ShieldCheck, Zap, Lock, Database } from 'lucide-react';
+import { Play, Download, Pause, Activity, Terminal as TerminalIcon, AlertCircle, CheckCircle2, ShieldCheck, Zap, Lock } from 'lucide-react';
 import { CarrierData, ScraperConfig, User } from '../types';
 import { generateMockCarrier, scrapeRealCarrier, downloadCSV } from '../services/mockService';
-import { saveCarrierToSupabase } from '../services/supabaseClient';
 
 const CONCURRENCY_LIMIT = 5;
 
@@ -13,9 +13,7 @@ interface ScraperProps {
 }
 
 export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade }) => {
-
   const [isRunning, setIsRunning] = useState(false);
-  const [dbSaveCount, setDbSaveCount] = useState(0); // ✅ ADDED
   const [config, setConfig] = useState<ScraperConfig>({
     startPoint: '1580000',
     recordCount: 50,
@@ -23,9 +21,8 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
     includeBrokers: false,
     onlyAuthorized: true,
     useMockData: false,
-    useProxy: true,
+    useProxy: true, // Default to using proxy
   });
-
   const [logs, setLogs] = useState<string[]>([]);
   const [scrapedData, setScrapedData] = useState<CarrierData[]>([]);
   const [progress, setProgress] = useState(0);
@@ -53,37 +50,35 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
         setShowUpgradeModal(true);
         return;
       }
-
       setIsRunning(true);
       isRunningRef.current = true;
-
       setLogs(prev => [...prev, `🚀 Initializing High-Speed Scraper...`]);
       setLogs(prev => [...prev, `Mode: ${config.useMockData ? 'Simulation' : config.useProxy ? 'Proxy Network' : 'Direct (VPN)'}`]);
       setLogs(prev => [...prev, `Targeting ${config.recordCount} records starting at MC# ${config.startPoint}`]);
-      setLogs(prev => [...prev, `💾 Supabase integration: ACTIVE`]);
-
       setScrapedData([]);
       setProgress(0);
-      setDbSaveCount(0); // ✅ RESET DB COUNT
-
       processScrapingConcurrent();
     }
   };
 
+  // Concurrent Processing Implementation
   const processScrapingConcurrent = async () => {
     const start = parseInt(config.startPoint);
     const total = config.recordCount;
     let completed = 0;
-
+    
+    // Track usage locally for this session to handle closure state
     let sessionExtracted = 0;
     const initialUsed = user.recordsExtractedToday;
     const limit = user.dailyLimit;
-
+    
+    // Create an array of tasks
     const tasks = Array.from({ length: total }, (_, i) => (start + i).toString());
 
     const worker = async (mc: string) => {
       if (!isRunningRef.current) return;
 
+      // Check limit before processing
       if (initialUsed + sessionExtracted >= limit) {
         isRunningRef.current = false;
         setIsRunning(false);
@@ -93,68 +88,65 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
       }
 
       let newData: CarrierData | null = null;
-
       try {
         if (config.useMockData) {
-          await new Promise(r => setTimeout(r, 100));
-          const isBroker = config.includeBrokers && (!config.includeCarriers || Math.random() > 0.5);
-          newData = generateMockCarrier(mc, isBroker);
+           await new Promise(r => setTimeout(r, 100));
+           const isBroker = config.includeBrokers && (!config.includeCarriers || Math.random() > 0.5);
+           newData = generateMockCarrier(mc, isBroker);
         } else {
-          newData = await scrapeRealCarrier(mc, config.useProxy);
+           // No artificial delay for maximum speed
+           newData = await scrapeRealCarrier(mc, config.useProxy);
         }
-      } catch (e) {}
+      } catch (e) {
+        // Silent fail or log
+      }
 
+      // Filter Logic
       if (newData) {
+         let matchesFilter = true;
+         const type = newData.entityType.toUpperCase();
+         const isCarrier = type.includes('CARRIER');
+         const isBroker = type.includes('BROKER');
+         const status = newData.status.toUpperCase();
 
-        let matchesFilter = true;
-        const type = newData.entityType.toUpperCase();
-        const isCarrier = type.includes('CARRIER');
-        const isBroker = type.includes('BROKER');
-        const status = newData.status.toUpperCase();
+         if (!config.includeCarriers && isCarrier && !isBroker) matchesFilter = false;
+         if (!config.includeBrokers && isBroker && !isCarrier) matchesFilter = false;
+         
+         if (config.onlyAuthorized) {
+             // Strict Check: Must include AUTHORIZED and MUST NOT include NOT AUTHORIZED
+             if (status.includes('NOT AUTHORIZED') || !status.includes('AUTHORIZED')) {
+                 matchesFilter = false;
+             }
+         }
 
-        if (!config.includeCarriers && isCarrier && !isBroker) matchesFilter = false;
-        if (!config.includeBrokers && isBroker && !isCarrier) matchesFilter = false;
-
-        if (config.onlyAuthorized) {
-          if (status.includes('NOT AUTHORIZED') || !status.includes('AUTHORIZED')) {
-            matchesFilter = false;
-          }
-        }
-
-        if (matchesFilter) {
-
-          setScrapedData(prev => [...prev, newData!]);
-
-          // ✅ SAVE TO SUPABASE
-          const saveResult = await saveCarrierToSupabase(newData);
-
-          if (saveResult.success) {
-            setDbSaveCount(prev => prev + 1);
-            setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData.legalName} → Saved to DB`]);
-          } else {
-            setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData.legalName} → DB Error: ${saveResult.error}`]);
-          }
-
-          sessionExtracted++;
-          onUpdateUsage(1);
-        }
+         if (matchesFilter) {
+             setScrapedData(prev => [...prev, newData!]);
+             setLogs(prev => [...prev, `[Success] MC ${mc}: ${newData!.legalName}`]);
+             
+             // Increment usage
+             sessionExtracted++;
+             onUpdateUsage(1);
+         } else {
+            // Optional: Reduce log noise for speed
+            // setLogs(prev => [...prev, `[Skipped] MC ${mc}`]);
+         }
       } else {
-        setLogs(prev => [...prev, `[Fail] MC ${mc} - No Data`]);
+         setLogs(prev => [...prev, `[Fail] MC ${mc} - No Data`]);
       }
 
       completed++;
       setProgress(Math.round((completed / total) * 100));
     };
 
+    // Execute with concurrency limit
     const activePromises: Promise<void>[] = [];
-
+    
     for (const mc of tasks) {
       if (!isRunningRef.current) break;
 
       const p = worker(mc).then(() => {
         activePromises.splice(activePromises.indexOf(p), 1);
       });
-
       activePromises.push(p);
 
       if (activePromises.length >= CONCURRENCY_LIMIT) {
@@ -166,9 +158,7 @@ export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onUpgrade
 
     setIsRunning(false);
     isRunningRef.current = false;
-
     setLogs(prev => [...prev, "✅ Batch Job Complete."]);
-    setLogs(prev => [...prev, `💾 Database: ${dbSaveCount} records persisted to Supabase`]);
   };
 
   const handleDownload = () => {
