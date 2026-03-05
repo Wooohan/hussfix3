@@ -12,7 +12,7 @@ interface ScraperProps {
 }
 
 // Adjust concurrency based on proxy quality. 3-4 is usually the sweet spot.
-const CONCURRENCY_LIMIT = 3; 
+const CONCURRENCY_LIMIT = 1; 
 
 export const Scraper: React.FC<ScraperProps> = ({ user, onUpdateUsage, onNewCarriers, onUpgrade }) => {
   const [isRunning, setIsRunning] = useState(false);
