@@ -1,20 +1,10 @@
-import { 
-  CarrierData, 
-  User, 
-  InsurancePolicy, 
-  BasicScore, 
-  OosRate 
-} from '../types';
-import { 
-  fetchCarrierFromBackend, 
-  fetchSafetyFromBackend, 
-  fetchInsuranceFromBackend 
-} from './backendService';
+import { CarrierData, User, InsurancePolicy, BasicScore, OosRate, BlockedIP } from '../types';
+import { fetchCarrierFromBackend, fetchSafetyFromBackend, fetchInsuranceFromBackend } from './backendService';
 
-// === HELPERS (VERCEL BUILD-SAFE) ===
-
+// === HELPER FUNCTIONS ===
 const cleanText = (text: string | null | undefined): string => {
   if (!text) return '';
+  // FIX: Replace newlines with spaces so the full address stays on one line in your CSV
   return text.replace(/\u00a0/g, ' ').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
 };
 
@@ -27,7 +17,9 @@ const cfDecodeEmail = (encoded: string): string => {
       email += String.fromCharCode(c);
     }
     return email;
-  } catch (e) { return ""; }
+  } catch (e) {
+    return "";
+  }
 };
 
 const findValueByLabel = (doc: Document, label: string): string => {
@@ -35,153 +27,183 @@ const findValueByLabel = (doc: Document, label: string): string => {
   const targetTh = ths.find(th => cleanText(th.textContent).includes(label));
   if (targetTh && targetTh.nextElementSibling) {
     const nextTd = targetTh.nextElementSibling;
-    if (nextTd instanceof HTMLElement) return cleanText(nextTd.innerText);
-    return cleanText(nextTd.textContent || '');
+    
+    // FIX FOR ADDRESS & VERCEL BUILD:
+    // 1. Cast to HTMLElement to allow access to .innerText (fixing the build error)
+    // 2. Use .innerText instead of childNodes[0] to grab text after the <br> tag (fixing the missing city/zip)
+    if (nextTd instanceof HTMLElement) {
+      return cleanText(nextTd.innerText);
+    }
+    
+    // Fallback if not an HTMLElement
+    const val = nextTd.childNodes[0]?.textContent || nextTd.textContent;
+    return cleanText(val);
   }
   return '';
 };
 
-const findMarkedLabels = (doc: Document, summary: string): string[] => {
-  const table = doc.querySelector(`table[summary="${summary}"]`);
-  if (!table) return [];
-  const labels: string[] = [];
-  table.querySelectorAll('td').forEach(cell => {
-    if (cell.textContent?.trim() === 'X' && cell.nextElementSibling) {
-      labels.push(cleanText(cell.nextElementSibling.textContent));
-    }
-  });
-  return labels;
-};
+// === NETWORK LAYER (FALLBACK) ===
 
-// === NETWORK LAYER ===
+const fetchUrl = async (targetUrl: string, useProxy: boolean): Promise<string | any | null> => {
+  if (!useProxy) {
+    try {
+      const response = await fetch(targetUrl);
+      if (response.ok) {
+        const contentType = response.headers.get("content-type");
+        return contentType?.includes("application/json") ? await response.json() : await response.text();
+      }
+    } catch (error) { return null; }
+  }
 
-const fetchUrl = async (targetUrl: string, useProxy: boolean): Promise<any> => {
   const proxyGenerators = [
     (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
     (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
   ];
 
-  for (const gen of proxyGenerators) {
+  for (const generateProxyUrl of proxyGenerators) {
     try {
-      const response = await fetch(gen(targetUrl));
-      if (!response.ok) continue;
-      const text = await response.text();
-      try {
-        const json = JSON.parse(text);
-        return json.contents || json;
-      } catch { return text; }
-    } catch (e) {}
+      const response = await fetch(generateProxyUrl(targetUrl));
+      if (response.ok) {
+        const text = await response.text();
+        try {
+          return JSON.parse(text);
+        } catch {
+          return text;
+        }
+      }
+    } catch (error) {}
   }
   return null;
 };
 
-// === MOCK DATA GENERATOR (Restored for Scraper.tsx) ===
+// === SCRAPER LOGIC (NOW USES BACKEND) ===
 
-export const generateMockCarrier = (mcNumber: string, isBroker: boolean): CarrierData => {
-  return {
-    mcNumber,
-    dotNumber: (parseInt(mcNumber) + 1000000).toString(),
-    legalName: `Mock ${isBroker ? 'Broker' : 'Carrier'} ${mcNumber} LLC`,
-    dbaName: '',
-    entityType: isBroker ? 'BROKER' : 'CARRIER',
-    status: 'AUTHORIZED FOR PROPERTY',
-    email: `contact@mock${mcNumber}.com`,
-    phone: '(555) 000-0000',
-    powerUnits: isBroker ? '0' : '15',
-    drivers: isBroker ? '0' : '12',
-    physicalAddress: '123 Logistics Way, Chicago, IL 60601',
-    mailingAddress: 'PO Box 123, Chicago, IL 60601',
-    dateScraped: new Date().toLocaleDateString(),
-    mcs150Date: '01/01/2024',
-    mcs150Mileage: '500,000',
-    operationClassification: ['Auth. For Hire'],
-    carrierOperation: ['Interstate'],
-    cargoCarried: ['General Freight'],
-    outOfServiceDate: '',
-    stateCarrierId: '',
-    dunsNumber: '',
-    insurancePolicies: [],
-    safetyRating: 'SATISFACTORY',
-    basicScores: [],
-    oosRates: []
-  };
-};
+export const fetchSafetyData = async (dot: string): Promise<{ 
+  rating: string, 
+  ratingDate: string, 
+  basicScores: BasicScore[], 
+  oosRates: OosRate[] 
+}> => {
+  // Try backend first
+  const backendResult = await fetchSafetyFromBackend(dot);
+  if (backendResult) {
+    return backendResult;
+  }
 
-// === DEEP DATA ENGINES ===
-
-export const fetchInsuranceData = async (dot: string): Promise<{policies: InsurancePolicy[], raw: any}> => {
-  const backend = await fetchInsuranceFromBackend(dot);
-  if (backend) return backend;
-
-  const result = await fetchUrl(`https://searchcarriers.com/company/${dot}/insurances`, true); 
-  const policies: InsurancePolicy[] = [];
-  const rawData = result?.data || (Array.isArray(result) ? result : []);
+  // Fallback to old proxy method
+  const url = `https://ai.fmcsa.dot.gov/SMS/Carrier/${dot}/CompleteProfile.aspx`;
+  const html = await fetchUrl(url, true);
   
-  if (Array.isArray(rawData)) {
-    rawData.forEach((p: any) => {
-      policies.push({
-        dot,
-        carrier: (p.name_company || 'N/A').toString().toUpperCase(),
-        policyNumber: (p.policy_no || 'N/A').toString().toUpperCase(),
-        effectiveDate: p.effective_date?.split(' ')[0] || 'N/A',
-        coverageAmount: p.max_cov_amount ? `$${Number(p.max_cov_amount).toLocaleString()}` : 'N/A',
-        type: p.ins_type_code === '1' ? 'BI&PD' : p.ins_type_code === '2' ? 'CARGO' : 'BOND',
-        class: p.ins_class_code === 'P' ? 'PRIMARY' : 'EXCESS'
-      });
+  if (typeof html !== 'string') throw new Error("Could not fetch safety data");
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+
+  const ratingEl = doc.getElementById('Rating');
+  const rating = ratingEl ? cleanText(ratingEl.textContent) : 'N/A';
+  
+  const ratingDateEl = doc.getElementById('RatingDate');
+  const ratingDate = ratingDateEl 
+    ? cleanText(ratingDateEl.textContent).replace('Rating Date:', '').replace('(', '').replace(')', '') 
+    : 'N/A';
+
+  const categories = ["Unsafe Driving", "Crash Indicator", "HOS Compliance", "Vehicle Maintenance", "Controlled Substances", "Hazmat Compliance", "Driver Fitness"];
+  const basicScores: BasicScore[] = [];
+  const sumDataRow = doc.querySelector('tr.sumData');
+  
+  if (sumDataRow) {
+    const cells = Array.from(sumDataRow.querySelectorAll('td'));
+    cells.forEach((cell, i) => {
+      const valSpan = cell.querySelector('span.val');
+      const val = valSpan ? cleanText(valSpan.textContent) : cleanText(cell.textContent);
+      if (categories[i]) {
+        basicScores.push({ category: categories[i], measure: val || '0.00' });
+      }
     });
   }
-  return { policies, raw: result };
+
+  const oosRates: OosRate[] = [];
+  const safetyDiv = doc.getElementById('SafetyRating');
+  const oosTable = safetyDiv?.querySelector('table');
+  if (oosTable) {
+    const rows = Array.from(oosTable.querySelectorAll('tbody tr'));
+    rows.forEach(row => {
+      const cols = Array.from(row.querySelectorAll('th, td'));
+      if (cols.length >= 3) {
+        oosRates.push({
+          type: cleanText(cols[0].textContent),
+          rate: cleanText(cols[1].textContent),
+          nationalAvg: cleanText(cols[2].textContent)
+        });
+      }
+    });
+  }
+
+  return { rating, ratingDate, basicScores, oosRates };
 };
 
-export const fetchSafetyData = async (dot: string): Promise<{ rating: string, ratingDate: string, basicScores: BasicScore[], oosRates: OosRate[] }> => {
-  const backend = await fetchSafetyFromBackend(dot);
-  if (backend) return backend;
+const fetchCarrierEmailFromSMS = async (dotNumber: string, useProxy: boolean): Promise<string> => {
+  if (!dotNumber || dotNumber === 'UNKNOWN' || dotNumber === '') return '';
+  const smsUrl = `https://ai.fmcsa.dot.gov/SMS/Carrier/${dotNumber}/CarrierRegistration.aspx`;
+  const result = await fetchUrl(smsUrl, useProxy);
+  if (typeof result !== 'string') return '';
 
-  const html = await fetchUrl(`https://ai.fmcsa.dot.gov/SMS/Carrier/${dot}/CompleteProfile.aspx`, true);
-  if (typeof html !== 'string') throw new Error("Safety fetch failed");
-
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const categories = ["Unsafe Driving", "Crash Indicator", "HOS Compliance", "Vehicle Maintenance", "Controlled Substances", "Hazmat Compliance", "Driver Fitness"];
-  
-  return {
-    rating: cleanText(doc.getElementById('Rating')?.textContent) || 'N/A',
-    ratingDate: cleanText(doc.getElementById('RatingDate')?.textContent).replace('Rating Date:', '').replace(/[()]/g, '') || 'N/A',
-    basicScores: Array.from(doc.querySelectorAll('tr.sumData td')).map((cell, i) => ({
-      category: categories[i] || 'N/A',
-      measure: cleanText(cell.querySelector('span.val')?.textContent || cell.textContent)
-    })).slice(0, 7),
-    oosRates: Array.from(doc.querySelectorAll('#SafetyRating table tr')).slice(1).map(row => {
-      const cols = row.querySelectorAll('th, td');
-      return { 
-        type: cleanText(cols[0]?.textContent), 
-        rate: cleanText(cols[1]?.textContent), 
-        nationalAvg: cleanText(cols[2]?.textContent) 
-      };
-    }).filter(r => r.type)
-  };
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(result, 'text/html');
+  const labels = doc.querySelectorAll('label');
+  for (let i = 0; i < labels.length; i++) {
+    if (labels[i].textContent?.includes('Email:')) {
+      const parent = labels[i].parentElement;
+      if (parent) {
+        const cfEmail = parent.querySelector('[data-cfemail]');
+        if (cfEmail) return cfDecodeEmail(cfEmail.getAttribute('data-cfemail') || '');
+        const text = cleanText(parent.textContent?.replace('Email:', ''));
+        if (text && text.includes('@')) return text;
+      }
+    }
+  }
+  return '';
 };
-
-// === MAIN SCRAPE ENGINE ===
 
 export const scrapeRealCarrier = async (mcNumber: string, useProxy: boolean): Promise<CarrierData | null> => {
-  const backend = await fetchCarrierFromBackend(mcNumber);
-  if (backend) return backend;
+  // Try backend first
+  const backendResult = await fetchCarrierFromBackend(mcNumber);
+  if (backendResult) {
+    return backendResult;
+  }
 
-  const html = await fetchUrl(`https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=MC_MX&query_string=${mcNumber}`, useProxy);
+  // Fallback to old proxy method
+  const url = `https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=MC_MX&query_string=${mcNumber}`;
+  const html = await fetchUrl(url, useProxy);
   if (typeof html !== 'string') return null;
 
-  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  if (!doc.querySelector('center')) return null;
+
   const getVal = (label: string) => findValueByLabel(doc, label);
-  const dot = getVal('USDOT Number:');
+
+  const findMarked = (summary: string) => {
+    const table = doc.querySelector(`table[summary="${summary}"]`);
+    if (!table) return [];
+    const res: string[] = [];
+    table.querySelectorAll('td').forEach(cell => {
+      if (cell.textContent?.trim() === 'X') {
+        const next = cell.nextElementSibling;
+        if (next) res.push(cleanText(next.textContent));
+      }
+    });
+    return res;
+  };
 
   const carrier: CarrierData = {
     mcNumber,
-    dotNumber: dot,
+    dotNumber: getVal('USDOT Number:'),
     legalName: getVal('Legal Name:'),
     dbaName: getVal('DBA Name:'),
-    entityType: Array.from(doc.querySelectorAll('th')).find(th => th.textContent?.includes('Entity Type:'))?.nextElementSibling?.textContent?.trim() || '',
-    status: getVal('Operating Authority Status:').split('*')[0].trim(),
-    email: '',
+    entityType: getVal('Entity Type:'),
+    status: getVal('Operating Authority Status:'),
+    email: '', 
     phone: getVal('Phone:'),
     powerUnits: getVal('Power Units:'),
     drivers: getVal('Drivers:'),
@@ -189,72 +211,164 @@ export const scrapeRealCarrier = async (mcNumber: string, useProxy: boolean): Pr
     mailingAddress: getVal('Mailing Address:'),
     dateScraped: new Date().toLocaleDateString('en-US'),
     mcs150Date: getVal('MCS-150 Form Date:'),
-    mcs150Mileage: getVal('MCS-150 Mileage (Year):').replace('Operation Classification:', '').trim(),
-    operationClassification: findMarkedLabels(doc, "Operation Classification"),
-    carrierOperation: findMarkedLabels(doc, "Carrier Operation"),
-    cargoCarried: findMarkedLabels(doc, "Cargo Carried"),
+    mcs150Mileage: getVal('MCS-150 Mileage (Year):'),
+    operationClassification: findMarked("Operation Classification"),
+    carrierOperation: findMarked("Carrier Operation"),
+    cargoCarried: findMarked("Cargo Carried"),
     outOfServiceDate: getVal('Out of Service Date:'),
     stateCarrierId: getVal('State Carrier ID Number:'),
-    dunsNumber: getVal('DUNS Number:'),
-    insurancePolicies: [],
-    safetyRating: 'N/A',
-    basicScores: [],
-    oosRates: []
+    dunsNumber: getVal('DUNS Number:')
   };
 
-  if (dot) {
-    const [smsHtml, safety, insurance] = await Promise.allSettled([
-      fetchUrl(`https://ai.fmcsa.dot.gov/SMS/Carrier/${dot}/CarrierRegistration.aspx`, true),
-      fetchSafetyData(dot),
-      fetchInsuranceData(dot)
-    ]);
-
-    if (smsHtml.status === 'fulfilled' && typeof smsHtml.value === 'string') {
-      const smsDoc = new DOMParser().parseFromString(smsHtml.value, 'text/html');
-      const emailLabel = Array.from(smsDoc.querySelectorAll('label')).find(l => l.textContent?.includes('Email:'));
-      const cf = emailLabel?.parentElement?.querySelector('[data-cfemail]');
-      carrier.email = cf ? cfDecodeEmail(cf.getAttribute('data-cfemail') || '') : '';
-    }
-
-    if (safety.status === 'fulfilled' && safety.value) {
-      carrier.safetyRating = safety.value.rating;
-      carrier.safetyRatingDate = safety.value.ratingDate;
-      carrier.basicScores = safety.value.basicScores;
-      carrier.oosRates = safety.value.oosRates;
-    }
-
-    if (insurance.status === 'fulfilled' && insurance.value) {
-      carrier.insurancePolicies = insurance.value.policies;
+  if (carrier.dotNumber) {
+    // Parallel fetch for speed: Email and Safety Data
+    try {
+      const [email, safety] = await Promise.all([
+        fetchCarrierEmailFromSMS(carrier.dotNumber, useProxy),
+        fetchSafetyData(carrier.dotNumber).catch(() => null)
+      ]);
+      
+      carrier.email = email;
+      if (safety) {
+        carrier.safetyRating = safety.rating;
+        carrier.safetyRatingDate = safety.ratingDate;
+        carrier.basicScores = safety.basicScores;
+        carrier.oosRates = safety.oosRates;
+      }
+    } catch (e) {
+      console.error("Error fetching additional data:", e);
     }
   }
 
   return carrier;
 };
 
-// === CSV EXPORT ===
+export const fetchInsuranceData = async (dot: string): Promise<{policies: InsurancePolicy[], raw: any}> => {
+  // Try backend first
+  const backendResult = await fetchInsuranceFromBackend(dot);
+  if (backendResult) {
+    return backendResult;
+  }
+
+  // Fallback to old proxy method
+  const url = `https://searchcarriers.com/company/${dot}/insurances`;
+  const result = await fetchUrl(url, true); 
+
+  const extractedPolicies: InsurancePolicy[] = [];
+  const rawData = result?.data || (Array.isArray(result) ? result : []);
+  
+  if (Array.isArray(rawData)) {
+    rawData.forEach((p: any) => {
+      const carrier = p.name_company || p.insurance_company || p.insurance_company_name || p.company_name || 'NOT SPECIFIED';
+      const policyNumber = p.policy_no || p.policy_number || p.pol_num || 'N/A';
+      const effectiveDate = p.effective_date ? p.effective_date.split(' ')[0] : 'N/A';
+
+      let coverage = p.max_cov_amount || p.coverage_to || p.coverage_amount || 'N/A';
+      if (coverage !== 'N/A' && !isNaN(Number(coverage))) {
+        const num = Number(coverage);
+        if (num < 10000 && num > 0) {
+          coverage = `$${(num * 1000).toLocaleString()}`;
+        } else {
+          coverage = `$${num.toLocaleString()}`;
+        }
+      }
+
+      let type = (p.ins_type_code || 'N/A').toString();
+      if (type === '1') type = 'BI&PD';
+      else if (type === '2') type = 'CARGO';
+      else if (type === '3') type = 'BOND';
+
+      let iClass = (p.ins_class_code || 'N/A').toString().toUpperCase();
+      if (iClass === 'P') iClass = 'PRIMARY';
+      else if (iClass === 'E') iClass = 'EXCESS';
+
+      extractedPolicies.push({
+        dot,
+        carrier: carrier.toString().toUpperCase(),
+        policyNumber: policyNumber.toString().toUpperCase(),
+        effectiveDate,
+        coverageAmount: coverage.toString(),
+        type: type.toUpperCase(),
+        class: iClass
+      });
+    });
+  }
+
+  return { policies: extractedPolicies, raw: result };
+};
 
 export const downloadCSV = (data: CarrierData[]) => {
-  const headers = ['Date', 'MC', 'Email', 'Legal Name', 'Address', 'Safety', 'Insurance Info'];
-  const escape = (val: any) => `"${String(val || '').replace(/"/g, '""')}"`;
+  const headers = [
+    'MC', 'DOT', 'Legal Name', 'Email', 'Phone', 'Status', 
+    'Physical Address', 'MCS-150 Date', 'Safety Rating', 'Rating Date',
+    'BASIC Scores', 'OOS Rates'
+  ];
+  
+  const escape = (val: string | number | undefined) => {
+    if (!val) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
 
   const csvRows = data.map(row => [
-    escape(row.dateScraped),
     row.mcNumber,
-    escape(row.email),
+    row.dotNumber,
     escape(row.legalName),
+    row.email,
+    row.phone,
+    escape(row.status),
     escape(row.physicalAddress),
+    row.mcs150Date,
     escape(row.safetyRating),
-    escape(row.insurancePolicies?.map(p => `${p.type}: ${p.coverageAmount}`).join('|'))
+    escape(row.safetyRatingDate),
+    escape(row.basicScores?.map(s => `${s.category}: ${s.measure}`).join(' | ')),
+    escape(row.oosRates?.map(r => `${r.type}: ${r.rate} (Avg: ${r.nationalAvg})`).join(' | '))
   ]);
-
+  
   const csvContent = [headers.join(','), ...csvRows.map(r => r.join(','))].join('\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `fmcsa_export_${Date.now()}.csv`;
+  link.href = url;
+  link.download = `carriers_full_report_${Date.now()}.csv`;
   link.click();
 };
 
 export const MOCK_USERS: User[] = [
-  { id: '1', name: 'Admin', email: 'wooohan3@gmail.com', role: 'admin', plan: 'Enterprise', dailyLimit: 100000, recordsExtractedToday: 450, lastActive: 'Now', ipAddress: '127.0.0.1', isOnline: true }
+  { id: '1', name: 'Admin User', email: 'wooohan3@gmail.com', role: 'admin', plan: 'Enterprise', dailyLimit: 100000, recordsExtractedToday: 450, lastActive: 'Now', ipAddress: '192.168.1.1', isOnline: true, isBlocked: false }
 ];
+
+export const BLOCKED_IPS: BlockedIP[] = [];
+
+export const generateMockCarrier = (mc: string, b: boolean): CarrierData => ({
+  mcNumber: mc,
+  dotNumber: (parseInt(mc)+1000000).toString(),
+  legalName: `Carrier ${mc} Logistics`,
+  dbaName: '',
+  entityType: b ? 'BROKER' : 'CARRIER',
+  status: 'AUTHORIZED',
+  email: 'info@carrier.com',
+  phone: '800-555-0199',
+  powerUnits: '12',
+  drivers: '14',
+  physicalAddress: '100 Logistics Way, Houston, TX 77002',
+  mailingAddress: '',
+  dateScraped: '2024-01-01',
+  mcs150Date: '2024-01-01',
+  mcs150Mileage: '120,000 (2023)',
+  operationClassification: [],
+  carrierOperation: [],
+  cargoCarried: [],
+  outOfServiceDate: '',
+  stateCarrierId: '',
+  dunsNumber: '',
+  safetyRating: 'SATISFACTORY',
+  safetyRatingDate: '2023-10-15',
+  basicScores: [
+    { category: 'Unsafe Driving', measure: '12.5%' },
+    { category: 'HOS Compliance', measure: '5.2%' }
+  ],
+  oosRates: [
+    { type: 'Vehicle', rate: '15.2%', nationalAvg: '21.4%' }
+  ]
+});
