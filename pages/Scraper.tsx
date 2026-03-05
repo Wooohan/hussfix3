@@ -5,7 +5,7 @@ import { generateMockCarrier, scrapeRealCarrier, downloadCSV, fetchSafetyData } 
 import { saveCarrierToSupabase } from '../services/supabaseClient';
 
 // RESTORED SPEED
-const CONCURRENCY_LIMIT = 2;
+const CONCURRENCY_LIMIT = 1;
 
 interface ScraperProps {
   user: User;
