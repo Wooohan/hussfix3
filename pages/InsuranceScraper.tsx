@@ -16,36 +16,29 @@ interface InsuranceScraperProps {
   onUpdateCarriers: (newData: CarrierData[]) => void;
 }
 
-const PolicyCard: React.FC<{ policy: InsurancePolicy; dot: string }> = ({ policy }) => {
-  const typeColors: Record<string, string> = {
-    'BI&PD': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    'CARGO': 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    'BOND': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  };
-  return (
-    <div className="p-4 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl space-y-3 hover:border-indigo-500/50 transition-all duration-300 shadow-xl">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <p className="text-white font-bold text-sm truncate uppercase tracking-tight">{policy.carrier}</p>
-          <p className="text-slate-500 text-[10px] font-mono mt-0.5 uppercase tracking-tighter">ID: {policy.policyNumber}</p>
-        </div>
-        <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black border uppercase ${typeColors[policy.type] || 'bg-slate-800 text-slate-400'}`}>
-          {policy.type}
-        </span>
+const PolicyCard: React.FC<{ policy: InsurancePolicy }> = ({ policy }) => (
+  <div className="p-4 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl space-y-3 hover:border-indigo-500/50 transition-all duration-300 shadow-xl">
+    <div className="flex items-start justify-between gap-2">
+      <div className="flex-1 min-w-0">
+        <p className="text-white font-bold text-sm truncate uppercase tracking-tight">{policy.carrier}</p>
+        <p className="text-slate-500 text-[10px] font-mono mt-0.5">ID: {policy.policyNumber}</p>
       </div>
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div className="bg-black/40 rounded-xl p-2.5 border border-white/5">
-          <p className="text-[9px] text-slate-500 uppercase font-black mb-1">Limit</p>
-          <p className="text-indigo-300 font-bold">{policy.coverageAmount}</p>
-        </div>
-        <div className="bg-black/40 rounded-xl p-2.5 border border-white/5">
-          <p className="text-[9px] text-slate-500 uppercase font-black mb-1">Expiry</p>
-          <p className="text-white font-bold">{policy.effectiveDate}</p>
-        </div>
+      <span className="px-2 py-0.5 rounded-lg text-[10px] font-black border uppercase bg-indigo-500/20 text-indigo-400 border-indigo-500/30">
+        {policy.type}
+      </span>
+    </div>
+    <div className="grid grid-cols-2 gap-2 text-xs">
+      <div className="bg-black/40 rounded-xl p-2.5 border border-white/5">
+        <p className="text-[9px] text-slate-500 uppercase font-black mb-1">Limit</p>
+        <p className="text-indigo-300 font-bold">{policy.coverageAmount}</p>
+      </div>
+      <div className="bg-black/40 rounded-xl p-2.5 border border-white/5">
+        <p className="text-[9px] text-slate-500 uppercase font-black mb-1">Expiry</p>
+        <p className="text-white font-bold">{policy.effectiveDate}</p>
       </div>
     </div>
-  );
-};
+  </div>
+);
 
 export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, onUpdateCarriers }) => {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -72,31 +65,31 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
     setLogs(prev => [...prev, { msg, type }]);
   };
 
-  // ── UPDATED SYNC: Uses MC Number as primary anchor ──
+  // ── REBUILT SYNC WITH NETWORK SAFETY ──
   const syncToDB = async (carrier: any, policies: InsurancePolicy[]) => {
+    const mc = (carrier.mc_number || carrier.mcNumber)?.toString().trim();
+    if (!mc) return { success: false, error: 'No MC Number' };
+
     try {
-      // Use mc_number since your schema says it is UNIQUE
-      const identifier = carrier.mc_number || carrier.mcNumber;
-      
-      const { error, data, status } = await supabase
+      // Add a tiny delay so we don't spam the network interface
+      await new Promise(r => setTimeout(r, 150));
+
+      const { data, error } = await supabase
         .from('carriers')
         .update({ 
           insurance_policies: policies,
           date_scraped: new Date().toISOString()
         })
-        .eq('mc_number', identifier.toString().trim())
-        .select(); // Calling .select() ensures we can see if rows were actually affected
+        .eq('mc_number', mc)
+        .select();
 
       if (error) throw error;
+      if (!data || data.length === 0) return { success: false, error: 'MC not found in DB' };
       
-      // Check if any row was actually modified
-      if (!data || data.length === 0) {
-        return { success: false, error: 'Record not found in database' };
-      }
-
       return { success: true };
     } catch (e: any) {
-      return { success: false, error: e.message };
+      console.error("Supabase Error:", e);
+      return { success: false, error: e.message || 'Fetch failed' };
     }
   };
 
@@ -110,13 +103,13 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
       setManualResult({ dot, policies });
       log(`✅ Found ${policies.length} policies for #${dot}`, 'success');
     } catch (e: any) {
-      log(`❌ Manual Lookup Error: ${e.message}`, 'error');
+      log(`❌ Lookup Error: ${e.message}`, 'error');
     } finally { setIsManualLoading(false); }
   };
 
   const handleMcRangeSearch = async () => {
     if (!mcRangeStart || !mcRangeEnd) return;
-    log(`📡 Querying MC Range: ${mcRangeStart} - ${mcRangeEnd}`, 'info');
+    log(`📡 Loading Range: MC ${mcRangeStart} - ${mcRangeEnd}`, 'info');
     try {
       const { data, error } = await supabase
         .from('carriers')
@@ -126,19 +119,19 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
 
       if (error) throw error;
       setMcRangeCarriers(data || []);
-      log(`✅ Range Loaded: ${data?.length || 0} carriers found.`, 'success');
-    } catch (err: any) { log(`❌ DB Fetch Error: ${err.message}`, 'error'); }
+      log(`✅ DB Response: ${data?.length || 0} carriers found.`, 'success');
+    } catch (err: any) { log(`❌ DB Error: ${err.message}`, 'error'); }
   };
 
   const startScrape = async () => {
     if (isProcessing) return;
     const target = mcRangeMode ? mcRangeCarriers : carriers;
-    if (target.length === 0) return log('⚠️ Buffer is empty. Pull records first.', 'warn');
+    if (target.length === 0) return log('⚠️ Load carriers first.', 'warn');
 
     setIsProcessing(true);
     isRunningRef.current = true;
     setStats({ total: target.length, insFound: 0, insFailed: 0, dbSaved: 0 });
-    log(`🚀 Engine Started. Target: ${target.length} records.`, 'info');
+    log(`🚀 Engine Started. Concurrency: Serial (Network Safe)`, 'info');
 
     const updated = [...target];
     let foundCount = 0;
@@ -149,43 +142,42 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
       if (!isRunningRef.current) break;
       
       const c = updated[i];
-      // Force string conversion to prevent type mismatch
       const dot = (c.dot_number || c.dotNumber)?.toString().trim();
 
       try {
         if (!dot || dot === "undefined") throw new Error('Missing DOT');
 
+        // Step 1: Fetch Insurance
         const { policies } = await fetchInsuranceData(dot);
         
-        // SYNC TO DB
+        // Step 2: Update Database (Awaited carefully)
         const db = await syncToDB(c, policies);
         
         if (db.success) {
           savedCount++;
         } else {
-          log(`⚠️ Update failed for DOT ${dot}: ${db.error}`, 'warn');
+          log(`⚠️ DB Bypass [${dot}]: ${db.error}`, 'warn');
         }
 
         if (policies.length > 0) {
           foundCount++;
           log(`✓ [${i+1}] DOT ${dot}: Found ${policies.length} policies.`, 'success');
         } else {
-          log(`- [${i+1}] DOT ${dot}: No data.`, 'info');
+          log(`- [${i+1}] DOT ${dot}: No insurance data.`, 'info');
         }
       } catch (e: any) {
         failCount++;
-        log(`! [${i+1}] Error: ${e.message}`, 'error');
+        log(`! [${i+1}] Network/Fetch Error: ${e.message}`, 'error');
       }
 
       setStats(s => ({ ...s, insFound: foundCount, insFailed: failCount, dbSaved: savedCount }));
       setProgress(Math.round(((i + 1) / target.length) * 100));
-
-      if ((i + 1) % 5 === 0) onUpdateCarriers([...updated]);
     }
 
     setIsProcessing(false);
     isRunningRef.current = false;
-    log(`🏁 Finished. Found: ${foundCount} | Saved to DB: ${savedCount}`, 'success');
+    onUpdateCarriers([...updated]);
+    log(`🏁 Finished. Total Saved to DB: ${savedCount}`, 'success');
   };
 
   return (
@@ -197,74 +189,79 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
             <ShieldCheck className="text-indigo-400" size={30} />
           </div>
           <div>
-            <h1 className="text-3xl font-black text-white tracking-tighter uppercase">Insurance Engine</h1>
+            <h1 className="text-3xl font-black text-white tracking-tighter uppercase italic">DeepScrape v2</h1>
             <div className="flex gap-4 text-[10px] font-bold text-slate-500 uppercase mt-1">
-              <span className="flex items-center gap-1"><Activity size={10} className="text-green-500" /> API: Live</span>
-              <span className="flex items-center gap-1"><Server size={10} className="text-indigo-500" /> DB: Connected</span>
+              <span className="flex items-center gap-1"><Activity size={10} className="text-green-500" /> Socket: Open</span>
+              <span className="flex items-center gap-1"><Server size={10} className="text-indigo-500" /> Database: Ready</span>
             </div>
           </div>
         </div>
 
         <button
           onClick={() => isProcessing ? (isRunningRef.current = false) : startScrape()}
-          className={`px-10 py-5 rounded-2xl font-black transition-all transform active:scale-95 shadow-2xl ${
-            isProcessing ? 'bg-red-500/20 text-red-500 border border-red-500/30' : 'bg-indigo-600 text-white'
+          className={`px-10 py-5 rounded-2xl font-black transition-all shadow-2xl ${
+            isProcessing ? 'bg-red-500/20 text-red-500 border border-red-500/30' : 'bg-indigo-600 text-white hover:bg-indigo-500'
           }`}
         >
-          {isProcessing ? 'STOP SCRAPER' : 'IGNITE SCRAPER'}
+          {isProcessing ? 'EMERGENCY STOP' : 'IGNITE SCRAPER'}
         </button>
       </div>
 
       <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
         <div className="col-span-4 space-y-5 overflow-y-auto pr-2 custom-scrollbar">
-          <div className="bg-white/5 backdrop-blur-3xl border border-white/10 p-6 rounded-3xl">
-            <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4">Manual Search</h3>
-            <div className="flex gap-2">
-              <input value={manualDot} onChange={e => setManualDot(e.target.value)} placeholder="DOT#" className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm" />
-              <button onClick={handleManualLookup} className="px-5 bg-white/10 rounded-xl border border-white/10 hover:bg-white/20">
-                {isManualLoading ? <Loader2 className="animate-spin" /> : <Zap size={18} />}
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-white/5 backdrop-blur-3xl border border-white/10 p-6 rounded-3xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Range Selector</h3>
-              <div className={`h-2 w-2 rounded-full ${mcRangeMode ? 'bg-indigo-500 shadow-[0_0_8px_indigo]' : 'bg-slate-700'}`} />
-            </div>
+          {/* Range Selector */}
+          <div className="bg-white/5 backdrop-blur-3xl border border-white/10 p-6 rounded-3xl shadow-2xl">
+            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Control Panel</h3>
             <div className="flex gap-2 mb-4">
-              <input value={mcRangeStart} onChange={e => setMcRangeStart(e.target.value)} placeholder="Start" className="w-1/2 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm" />
-              <input value={mcRangeEnd} onChange={e => setMcRangeEnd(e.target.value)} placeholder="End" className="w-1/2 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm" />
+              <input value={mcRangeStart} onChange={e => setMcRangeStart(e.target.value)} placeholder="Start MC" className="w-1/2 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-indigo-500 outline-none transition-all" />
+              <input value={mcRangeEnd} onChange={e => setMcRangeEnd(e.target.value)} placeholder="End MC" className="w-1/2 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-indigo-500 outline-none transition-all" />
             </div>
             <button onClick={handleMcRangeSearch} className="w-full bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 py-4 rounded-xl text-[10px] font-black uppercase hover:bg-indigo-600/20 transition-all">
-              Load Database Carriers
+              Load From Database
             </button>
           </div>
 
-          <div className="bg-indigo-600/5 border border-indigo-500/10 p-6 rounded-[2.5rem] space-y-6">
-            <div className="grid grid-cols-2 gap-4 text-center">
-              <div><p className="text-[10px] font-black text-slate-500 uppercase">Found</p><p className="text-4xl font-black text-white">{stats.insFound}</p></div>
-              <div><p className="text-[10px] font-black text-green-500 uppercase">Saved</p><p className="text-4xl font-black text-white">{stats.dbSaved}</p></div>
+          {/* Stats Display */}
+          <div className="bg-indigo-600/5 border border-indigo-500/10 p-8 rounded-[2.5rem] space-y-8 shadow-inner">
+            <div className="grid grid-cols-2 gap-6 text-center">
+              <div className="bg-black/40 p-5 rounded-3xl border border-white/5">
+                <p className="text-[10px] font-black text-indigo-400 uppercase mb-2">Policies Found</p>
+                <p className="text-5xl font-black text-white">{stats.insFound}</p>
+              </div>
+              <div className="bg-black/40 p-5 rounded-3xl border border-white/5">
+                <p className="text-[10px] font-black text-green-500 uppercase mb-2">DB Updates</p>
+                <p className="text-5xl font-black text-white">{stats.dbSaved}</p>
+              </div>
             </div>
-            <div className="space-y-2">
-              <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase"><span>Progress</span><span>{progress}%</span></div>
-              <div className="h-2 bg-black/40 rounded-full overflow-hidden border border-white/5">
-                <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${progress}%` }} />
+            <div className="space-y-3">
+              <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                <span>Task Progress</span>
+                <span className="text-indigo-400">{progress}%</span>
+              </div>
+              <div className="h-3 bg-black/40 rounded-full overflow-hidden border border-white/5">
+                <div className="h-full bg-gradient-to-r from-indigo-600 to-indigo-400 transition-all duration-700 ease-out" style={{ width: `${progress}%` }} />
               </div>
             </div>
           </div>
         </div>
 
-        <div className="col-span-8 bg-black/40 backdrop-blur-3xl rounded-[2.5rem] border border-white/10 flex flex-col overflow-hidden">
-          <div className="bg-white/5 p-5 border-b border-white/10 px-8 flex justify-between items-center">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Traffic Console</span>
-            {isPaused && <span className="text-amber-500 text-[9px] font-black animate-pulse">COOLDOWN ACTIVE</span>}
+        {/* Traffic Console */}
+        <div className="col-span-8 bg-black/40 backdrop-blur-3xl rounded-[2.5rem] border border-white/10 flex flex-col overflow-hidden shadow-2xl relative">
+          <div className="bg-white/5 p-6 border-b border-white/10 px-10 flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_green]" />
+              <span className="text-[11px] font-black text-slate-400 uppercase tracking-[0.4em]">Live Stream</span>
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-8 font-mono text-[11px] leading-relaxed custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-10 font-mono text-[11px] leading-loose custom-scrollbar">
             {logs.map((log, i) => (
-              <div key={i} className={`flex gap-4 mb-1 ${log.type === 'success' ? 'text-green-400' : log.type === 'error' ? 'text-red-400' : log.type === 'warn' ? 'text-amber-400' : 'text-slate-500'}`}>
-                <span className="opacity-20 shrink-0 tracking-tighter">{new Date().toLocaleTimeString([], {hour12: false})}</span>
-                <span>{log.msg}</span>
+              <div key={i} className={`flex gap-6 mb-2 animate-in fade-in slide-in-from-left-2 ${
+                log.type === 'success' ? 'text-green-400' : 
+                log.type === 'error' ? 'text-red-400' : 
+                log.type === 'warn' ? 'text-amber-400' : 'text-slate-500'
+              }`}>
+                <span className="opacity-20 shrink-0 font-bold tracking-tighter">[{new Date().toLocaleTimeString([], {hour12: false})}]</span>
+                <span className="select-text">{log.msg}</span>
               </div>
             ))}
             <div ref={logsEndRef} />
