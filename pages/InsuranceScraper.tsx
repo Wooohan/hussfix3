@@ -6,7 +6,7 @@ import { updateCarrierInsurance, supabase } from '../services/supabaseClient';
 
 // High concurrency — searchcarriers.com is a private API, not FMCSA
 // No rate limiting risk, run as fast as possible
-const CONCURRENCY = 5;
+const CONCURRENCY = 10;
 
 interface InsuranceScraperProps {
   carriers: CarrierData[];
@@ -51,8 +51,9 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({
       const { data, error } = await supabase
         .from('carriers')
         .select('*')
-        .gte('mc_number', mcRangeStart)
-        .lte('mc_number', mcRangeEnd);
+        .gte('mc_number', parseInt(mcRangeStart))
+        .lte('mc_number', parseInt(mcRangeEnd))
+        .order('mc_number', { ascending: true });
       if (error) throw error;
 
       // Supabase returns snake_case columns — map to camelCase CarrierData
@@ -110,6 +111,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({
 
     const updated = [...targetCarriers];
     let completed = 0;
+    let totalInsFound = 0; // local counter — avoids stale state closure bug
 
     const worker = async (index: number) => {
       if (!isRunningRef.current) return;
@@ -127,6 +129,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({
       try {
         const result = await fetchInsuranceData(dot);
         const hasInsurance = result.policies.length > 0;
+        if (hasInsurance) totalInsFound++;
 
         // Update carrier object
         updated[index] = { ...updated[index], insurancePolicies: result.policies };
@@ -180,7 +183,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({
 
     setIsProcessing(false);
     isRunningRef.current = false;
-    log(`🎉 Done. ${completed} processed, ${stats.insFound} with insurance.`);
+    log(`🎉 Done. ${completed} processed, ${totalInsFound} with insurance.`);
   };
 
   const handleStop = () => {
