@@ -2,10 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ClipboardList, Loader2, Zap, ShieldCheck, Database, RotateCcw, Search, X, AlertCircle } from 'lucide-react';
 import { CarrierData, InsurancePolicy } from '../types';
 import { fetchInsuranceData } from '../services/mockService';
-import { supabase } from '../services/supabaseClient';
+import { updateCarrierInsurance, supabase } from '../services/supabaseClient';
 
 // High concurrency — searchcarriers.com is a private API, not FMCSA
-const CONCURRENCY = 1;
+const CONCURRENCY = 10;
 
 interface InsuranceScraperProps {
   carriers: CarrierData[];
@@ -13,31 +13,6 @@ interface InsuranceScraperProps {
   autoStart?: boolean;
 }
 
-// ── Save insurance to carriers.insurance_policies JSON column ──
-const saveInsuranceToSupabase = async (
-  dot: string,
-  policies: InsurancePolicy[]
-): Promise<{ success: boolean; error?: string }> => {
-  try {
-    const jsonPolicies = policies.map(p => ({
-      dot,
-      type:           p.type,
-      class:          p.class,
-      carrier:        p.carrier,
-      policyNumber:   p.policyNumber,
-      effectiveDate:  p.effectiveDate,
-      coverageAmount: p.coverageAmount,
-    }));
-    const { error } = await supabase
-      .from('carriers')
-      .update({ insurance_policies: jsonPolicies })
-      .eq('dot_number', dot);
-    if (error) return { success: false, error: error.message };
-    return { success: true };
-  } catch (e: any) {
-    return { success: false, error: e.message };
-  }
-};
 
 // ── Policy Card Component ──
 const PolicyCard: React.FC<{ policy: InsurancePolicy; dot: string }> = ({ policy, dot }) => {
@@ -142,7 +117,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({
         setDotResult({ dot, policies: result.policies });
 
         // Also save to Supabase
-        await saveInsuranceToSupabase(dot, result.policies);
+        await updateCarrierInsurance(dot, { policies: result.policies });
       }
     } catch (e: any) {
       setDotError(`Error fetching DOT #${dot}: ${e.message}`);
@@ -244,7 +219,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({
         updated[index] = { ...updated[index], insurancePolicies: result.policies };
 
         // ✅ Save to carriers.insurance_policies JSON column
-        const saveResult = await saveInsuranceToSupabase(dot, result.policies);
+        const saveResult = await updateCarrierInsurance(dot, { policies: result.policies });
 
         setStats(s => ({
           ...s,
