@@ -1,82 +1,13 @@
-import { CarrierData, User } from '../types';
+import { CarrierData, User, InsurancePolicy, BasicScore, OosRate, BlockedIP } from '../types';
 
-// === MOCK DATA GENERATION ===
-const FIRST_NAMES = ['Logistics', 'Freight', 'Transport', 'Carrier', 'Hauling', 'Shipping', 'Express', 'Roadway'];
-const LAST_NAMES = ['Solutions', 'LLC', 'Inc', 'Group', 'Systems', 'Lines', 'Brothers', 'Global'];
-const CITIES = ['Chicago', 'Dallas', 'Atlanta', 'Los Angeles', 'Miami', 'New York'];
-const STATES = ['IL', 'TX', 'GA', 'CA', 'FL', 'NY'];
-const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1) + min);
-
-export const generateMockCarrier = (mcNumber: string, isBroker: boolean): CarrierData => {
-  const name1 = FIRST_NAMES[randomInt(0, FIRST_NAMES.length - 1)];
-  const name2 = LAST_NAMES[randomInt(0, LAST_NAMES.length - 1)];
-  const companyName = Math.random() > 0.3 ? `${name1} ${name2}` : `${name1} Services`;
-  const city = CITIES[randomInt(0, CITIES.length - 1)];
-  const state = STATES[randomInt(0, STATES.length - 1)];
-  return {
-    mcNumber,
-    dotNumber: (parseInt(mcNumber) + 1000000).toString(),
-    legalName: companyName,
-    dbaName: Math.random() > 0.7 ? `${companyName} DBA` : '',
-    entityType: isBroker ? 'BROKER' : 'CARRIER',
-    status: Math.random() > 0.1 ? 'AUTHORIZED FOR Property' : 'NOT AUTHORIZED',
-    email: `contact@${companyName.toLowerCase().replace(/\s/g, '')}.com`,
-    phone: `(${randomInt(200, 900)}) ${randomInt(100, 999)}-${randomInt(1000, 9999)}`,
-    powerUnits: isBroker ? '0' : randomInt(1, 50).toString(),
-    drivers: isBroker ? '0' : randomInt(1, 60).toString(),
-    physicalAddress: `${randomInt(100, 9999)} Main St, ${city}, ${state}`,
-    mailingAddress: `${randomInt(100, 9999)} PO Box, ${city}, ${state}`,
-    dateScraped: new Date().toLocaleDateString(),
-    mcs150Date: '01/01/2023',
-    mcs150Mileage: '100000',
-    operationClassification: ['Auth. For Hire'],
-    carrierOperation: ['Interstate'],
-    cargoCarried: ['General Freight'],
-    outOfServiceDate: '',
-    stateCarrierId: '',
-    dunsNumber: '',
-    safetyRating: Math.random() > 0.2 ? 'SATISFACTORY' : (Math.random() > 0.5 ? 'UNSATISFACTORY' : 'NONE'),
-    safetyRatingDate: '05/12/2022',
-    basicScores: [
-      { category: 'Unsafe Driving', measure: `${randomInt(0, 100)}%` },
-      { category: 'HOS Compliance', measure: `${randomInt(0, 100)}%` },
-      { category: 'Vehicle Maintenance', measure: `${randomInt(0, 100)}%` },
-      { category: 'Driver Fitness', measure: `${randomInt(0, 100)}%` }
-    ],
-    oosRates: [
-      { type: 'Vehicle', oosPercent: `${randomInt(5, 25)}%`, nationalAvg: '21.4%' },
-      { type: 'Driver', oosPercent: `${randomInt(1, 10)}%`, nationalAvg: '5.5%' },
-      { type: 'Hazmat', oosPercent: '0%', nationalAvg: '4.5%' }
-    ]
-  };
-};
-
-// === ADMIN / USER MOCK DATA ===
-export const MOCK_USERS: User[] = [
-  {
-    id: '1', name: 'Admin User', email: 'wooohan3@gmail.com', role: 'admin', plan: 'Enterprise',
-    dailyLimit: 100000, recordsExtractedToday: 450, lastActive: 'Now', ipAddress: '192.168.1.1', isOnline: true
-  },
-  {
-    id: '2', name: 'John Doe', email: 'john@logistics.com', role: 'user', plan: 'Pro',
-    dailyLimit: 5000, recordsExtractedToday: 1240, lastActive: '5m ago', ipAddress: '45.22.19.112', isOnline: true
-  },
-  {
-    id: '3', name: 'Sarah Smith', email: 'sarah@shipping.net', role: 'user', plan: 'Starter',
-    dailyLimit: 1000, recordsExtractedToday: 980, lastActive: '2h ago', ipAddress: '67.11.90.221', isOnline: false
-  },
-  {
-    id: '4', name: 'Mike Ross', email: 'mike@ross.com', role: 'user', plan: 'Pro',
-    dailyLimit: 5000, recordsExtractedToday: 42, lastActive: 'Now', ipAddress: '98.12.33.11', isOnline: true
-  }
-];
+// ============================================================
+// CONSTANTS
+// ============================================================
+const BASE_URL = ''; // '' = same Vercel domain. Change to 'http://localhost:3001' for local server
 
 // ============================================================
 // FETCH — always routes through /api/proxy (Vercel datacenter IP)
-// When moving to local server: change BASE_URL to http://localhost:3001
 // ============================================================
-const BASE_URL = ''; // empty = same domain (Vercel). For local: 'http://localhost:3001'
-
 const fetchFmcsa = async (
   targetUrl: string,
   retries = 2,
@@ -89,18 +20,15 @@ const fetchFmcsa = async (
       const res = await fetch(proxyUrl, {
         signal: AbortSignal.timeout(15000)
       });
-
-      // 4xx from FMCSA = MC doesn't exist, don't retry
+      // 4xx = MC/DOT doesn't exist, don't retry
       if (res.status >= 400 && res.status < 500) return null;
-
       if (res.ok) {
         const text = await res.text();
         if (text && text.length > 100) return text;
       }
     } catch (e) {
-      // Timeout or network error
+      // timeout or network error
     }
-
     if (attempt < retries) {
       await new Promise(r => setTimeout(r, delayMs * (attempt + 1)));
     }
@@ -111,6 +39,11 @@ const fetchFmcsa = async (
 // ============================================================
 // HTML HELPERS
 // ============================================================
+const cleanText = (text: string | null | undefined): string => {
+  if (!text) return '';
+  return text.replace(/\u00a0/g, ' ').replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+};
+
 const cfDecodeEmail = (encoded: string): string => {
   try {
     let email = '';
@@ -121,19 +54,17 @@ const cfDecodeEmail = (encoded: string): string => {
   } catch { return ''; }
 };
 
-const getTextWithSpaces = (element: Element | null): string => {
-  if (!element) return '';
-  let text = '';
-  element.childNodes.forEach(node => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      text += (node.nodeValue || '').trim() + ' ';
-    } else if (node.nodeType === Node.ELEMENT_NODE) {
-      const tag = (node as Element).tagName.toLowerCase();
-      if (tag !== 'script' && tag !== 'style')
-        text += getTextWithSpaces(node as Element);
-    }
-  });
-  return text.replace(/\s+/g, ' ').trim();
+// ✅ FIX: Uses th→nextElementSibling→innerText (handles <br> tags in addresses/mileage)
+// This is why old code got full mileage "120,000 (2023)" and our regex only got "120,000"
+const findValueByLabel = (doc: Document, label: string): string => {
+  const ths = Array.from(doc.querySelectorAll('th'));
+  const targetTh = ths.find(th => cleanText(th.textContent).includes(label));
+  if (targetTh?.nextElementSibling) {
+    const td = targetTh.nextElementSibling;
+    if (td instanceof HTMLElement) return cleanText(td.innerText);
+    return cleanText(td.childNodes[0]?.textContent || td.textContent);
+  }
+  return '';
 };
 
 const findMarkedLabels = (doc: Document, summary: string): string[] => {
@@ -143,14 +74,14 @@ const findMarkedLabels = (doc: Document, summary: string): string[] => {
   table.querySelectorAll('td').forEach(cell => {
     if (cell.textContent?.trim() === 'X') {
       const next = cell.nextElementSibling;
-      if (next) labels.push(next.textContent?.trim() || '');
+      if (next) labels.push(cleanText(next.textContent));
     }
   });
   return labels;
 };
 
 // ============================================================
-// EMAIL FETCHER (ai.fmcsa.dot.gov/CarrierRegistration)
+// EMAIL FETCHER
 // ============================================================
 const findDotEmail = async (dotNumber: string): Promise<string> => {
   if (!dotNumber) return '';
@@ -165,98 +96,162 @@ const findDotEmail = async (dotNumber: string): Promise<string> => {
   for (let i = 0; i < labels.length; i++) {
     if (!labels[i].textContent?.includes('Email:')) continue;
 
+    // Check parent for CF-protected email
+    const parent = labels[i].parentElement;
+    if (parent) {
+      const cfEmail = parent.querySelector('[data-cfemail]');
+      if (cfEmail) return cfDecodeEmail(cfEmail.getAttribute('data-cfemail') || '');
+      const text = cleanText(parent.textContent?.replace('Email:', ''));
+      if (text && text.includes('@')) return text;
+    }
+
+    // Check sibling
     const sibling = labels[i].nextElementSibling;
     if (sibling) {
       if (sibling.hasAttribute('data-cfemail'))
         return cfDecodeEmail(sibling.getAttribute('data-cfemail')!);
       const cfChild = sibling.querySelector('[data-cfemail]');
       if (cfChild) return cfDecodeEmail(cfChild.getAttribute('data-cfemail')!);
-      const txt = sibling.textContent?.trim();
+      const txt = cleanText(sibling.textContent);
       if (txt && txt.length > 4 && !txt.toLowerCase().includes('email protected')) return txt;
-    }
-
-    let next = labels[i].nextSibling;
-    while (next && next.nodeType !== Node.TEXT_NODE && next.nodeType !== Node.ELEMENT_NODE)
-      next = next.nextSibling;
-
-    if (next?.nodeType === Node.ELEMENT_NODE) {
-      const el = next as Element;
-      if (el.hasAttribute('data-cfemail')) return cfDecodeEmail(el.getAttribute('data-cfemail')!);
-      const nested = el.querySelector('[data-cfemail]');
-      if (nested) return cfDecodeEmail(nested.getAttribute('data-cfemail')!);
-      const val = el.textContent?.trim();
-      if (val && !val.toLowerCase().includes('email protected')) return val;
-    } else if (next?.nodeType === Node.TEXT_NODE) {
-      const val = next.textContent?.trim();
-      if (val && val.length > 4 && !val.toLowerCase().includes('email protected')) return val;
     }
   }
   return '';
 };
 
 // ============================================================
-// SAFETY PROFILE FETCHER (ai.fmcsa.dot.gov/CompleteProfile)
+// SAFETY DATA — exported for InsuranceScraper
 // ============================================================
-const scrapeFmcsaComplete = async (dotNumber: string) => {
-  if (!dotNumber) return null;
+export const fetchSafetyData = async (dot: string): Promise<{
+  rating: string;
+  ratingDate: string;
+  basicScores: BasicScore[];
+  oosRates: OosRate[];
+}> => {
+  if (!dot) return { rating: 'N/A', ratingDate: '', basicScores: [], oosRates: [] };
+
   const html = await fetchFmcsa(
-    `https://ai.fmcsa.dot.gov/SMS/Carrier/${dotNumber}/CompleteProfile.aspx`
+    `https://ai.fmcsa.dot.gov/SMS/Carrier/${dot}/CompleteProfile.aspx`
   );
-  if (!html) return null;
+  if (!html) return { rating: 'N/A', ratingDate: '', basicScores: [], oosRates: [] };
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  // Safety Rating
+  const rating = cleanText(doc.getElementById('Rating')?.textContent) || 'NOT RATED';
+  const ratingDate = cleanText(doc.getElementById('RatingDate')?.textContent)
+    .replace('Rating Date:', '').replace(/[()]/g, '').trim();
 
   // BASIC Scores
   const categories = [
     'Unsafe Driving', 'Crash Indicator', 'HOS Compliance',
     'Vehicle Maintenance', 'Controlled Substances', 'Hazmat Compliance', 'Driver Fitness'
   ];
-  const basicScores: { category: string; measure: string }[] = [];
-  const measureRow = doc.querySelector('tr.sumData');
-  if (measureRow) {
-    measureRow.querySelectorAll('td').forEach((cell, i) => {
-      if (i < categories.length) {
-        const val = cell.querySelector('span.val')?.textContent?.trim()
-          || cell.textContent?.trim()
-          || 'N/A';
+  const basicScores: BasicScore[] = [];
+  const sumDataRow = doc.querySelector('tr.sumData');
+  if (sumDataRow) {
+    sumDataRow.querySelectorAll('td').forEach((cell, i) => {
+      if (categories[i]) {
+        const val = cleanText(cell.querySelector('span.val')?.textContent || cell.textContent) || '0.00';
         basicScores.push({ category: categories[i], measure: val });
       }
     });
   }
 
-  // Safety Rating
-  const safetyRating = doc.getElementById('Rating')?.textContent?.trim() || 'NOT RATED';
-  const safetyRatingDate = (doc.getElementById('RatingDate')?.textContent || '')
-    .replace('Rating Date:', '').replace(/[()]/g, '').trim();
-
   // OOS Rates
-  const oosRates: { type: string; oosPercent: string; nationalAvg: string }[] = [];
+  const oosRates: OosRate[] = [];
   const oosTable = doc.getElementById('SafetyRating')?.querySelector('table');
   if (oosTable) {
-    oosTable.querySelectorAll('tr').forEach(row => {
+    oosTable.querySelectorAll('tbody tr').forEach(row => {
       const cols = row.querySelectorAll('th, td');
       if (cols.length >= 3) {
-        const type = cols[0].textContent?.trim() || '';
+        const type = cleanText(cols[0].textContent);
         if (type && type !== 'Type') {
           oosRates.push({
             type,
-            oosPercent: cols[1].textContent?.trim() || '',
-            nationalAvg: cols[2].textContent?.trim() || ''
+            rate: cleanText(cols[1].textContent),
+            nationalAvg: cleanText(cols[2].textContent)
           });
         }
       }
     });
   }
 
-  return { safetyRating, safetyRatingDate, basicScores, oosRates };
+  return { rating, ratingDate, basicScores, oosRates };
 };
 
 // ============================================================
-// MAIN SCRAPER — called by Scraper.tsx per MC
+// INSURANCE DATA — exported for InsuranceScraper
+// hits searchcarriers.com API directly (no FMCSA, no proxy needed)
+// ============================================================
+export const fetchInsuranceData = async (dot: string): Promise<{
+  policies: InsurancePolicy[];
+  raw: any;
+}> => {
+  if (!dot) return { policies: [], raw: null };
+
+  // searchcarriers.com is a public API — no proxy needed, no CORS issues
+  let result: any = null;
+  try {
+    const res = await fetch(`https://searchcarriers.com/company/${dot}/insurances`, {
+      signal: AbortSignal.timeout(10000)
+    });
+    if (res.ok) {
+      result = await res.json();
+    }
+  } catch (e) {
+    return { policies: [], raw: null };
+  }
+
+  const rawData = result?.data || (Array.isArray(result) ? result : []);
+  const policies: InsurancePolicy[] = [];
+
+  if (Array.isArray(rawData)) {
+    rawData.forEach((p: any) => {
+      // Insurance company name
+      const carrier = (
+        p.name_company || p.insurance_company || p.insurance_company_name || p.company_name || 'NOT SPECIFIED'
+      ).toString().toUpperCase();
+
+      // Policy number
+      const policyNumber = (p.policy_no || p.policy_number || p.pol_num || 'N/A').toString().toUpperCase();
+
+      // Effective date
+      const effectiveDate = p.effective_date ? p.effective_date.split(' ')[0] : 'N/A';
+
+      // Coverage amount — convert raw number to dollar format
+      let coverage = p.max_cov_amount || p.coverage_to || p.coverage_amount || 'N/A';
+      if (coverage !== 'N/A' && !isNaN(Number(coverage))) {
+        const num = Number(coverage);
+        coverage = num < 10000 && num > 0
+          ? `$${(num * 1000).toLocaleString()}`
+          : `$${num.toLocaleString()}`;
+      }
+
+      // Insurance type
+      let type = (p.ins_type_code || 'N/A').toString();
+      if (type === '1') type = 'BI&PD';
+      else if (type === '2') type = 'CARGO';
+      else if (type === '3') type = 'BOND';
+
+      // Insurance class
+      let iClass = (p.ins_class_code || 'N/A').toString().toUpperCase();
+      if (iClass === 'P') iClass = 'PRIMARY';
+      else if (iClass === 'E') iClass = 'EXCESS';
+
+      policies.push({ dot, carrier, policyNumber, effectiveDate, coverageAmount: coverage, type, class: iClass });
+    });
+  }
+
+  return { policies, raw: result };
+};
+
+// ============================================================
+// MAIN CARRIER SCRAPER
 // ============================================================
 export const scrapeRealCarrier = async (
   mcNumber: string,
-  _useProxy: boolean  // ignored — always uses /api/proxy now
+  _useProxy: boolean // ignored — always uses /api/proxy
 ): Promise<CarrierData | null> => {
 
   // ── Request 1: MC Snapshot ──
@@ -266,42 +261,24 @@ export const scrapeRealCarrier = async (
   if (!html) return null;
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  const center = doc.querySelector('center');
-  if (!center) return null; // 4.7kb = MC doesn't exist, totally normal
+  if (!doc.querySelector('center')) return null; // 4.7kb = MC doesn't exist, totally normal
 
-  // Crawl date
-  let crawlDate = new Date().toLocaleDateString('en-US');
-  doc.querySelectorAll('b').forEach(b => {
-    const match = (b.textContent || '').match(/as of(.*?)\./);
-    if (match?.[1]) {
-      let d = match[1].trim();
-      if (d.length > 15) d = d.split('.')[0];
-      crawlDate = d.trim();
-    }
-  });
+  // ✅ Use findValueByLabel for ALL fields — handles <br> tags correctly
+  // This fixes mileage showing "120,000" instead of "120,000 (2023)"
+  // and addresses missing city/state/zip after the <br>
+  const getVal = (label: string) => findValueByLabel(doc, label);
 
-  // Entity type & status
-  let entityType = '', status = '';
-  doc.querySelectorAll('th').forEach(th => {
-    const h = th.textContent?.trim() || '';
-    if (h === 'Entity Type:') entityType = th.nextElementSibling?.textContent?.trim() || '';
-    if (h === 'Operating Authority Status:') status = th.nextElementSibling?.textContent?.trim() || '';
-  });
-  status = status
-    .replace(/(\*Please Note|Please Note|For Licensing)[\s\S]*/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const dotNumber = getVal('USDOT Number:');
 
-  const info = getTextWithSpaces(center);
-  const ex = (p: RegExp) => info.match(p)?.[1]?.trim() || '';
-
-  const dotNumber = ex(/USDOT Number:\s*(.*?)(?:State Carrier ID Number:|$)/);
+  // Status cleanup
+  let status = getVal('Operating Authority Status:');
+  status = status.replace(/(\*Please Note|Please Note|For Licensing)[\s\S]*/i, '').replace(/\s+/g, ' ').trim();
 
   // ── Requests 2 & 3: Email + Safety (parallel) ──
   const [email, safety] = dotNumber
     ? await Promise.all([
         findDotEmail(dotNumber),
-        scrapeFmcsaComplete(dotNumber)
+        fetchSafetyData(dotNumber)
       ])
     : ['', null];
 
@@ -310,29 +287,29 @@ export const scrapeRealCarrier = async (
   return {
     mcNumber,
     dotNumber,
-    legalName:   ex(/Legal Name:\s*(.*?)(?:DBA Name:|Physical Address:|$)/),
-    dbaName:     ex(/DBA Name:\s*(.*?)(?:Physical Address:|$)/),
-    entityType,
+    legalName:   getVal('Legal Name:'),
+    dbaName:     getVal('DBA Name:'),
+    entityType:  getVal('Entity Type:'),
     status,
     email: cleanEmail.toLowerCase().includes('email protected') ? '' : cleanEmail,
-    phone:       ex(/Phone:\s*(.*?)(?:Mailing Address:|$)/),
-    powerUnits:  ex(/Power Units:\s*(\d+)/),
-    drivers:     ex(/Drivers:\s*(\d+)/),
-    physicalAddress: ex(/Physical Address:\s*(.*?)(?:Phone:|$)/),
-    mailingAddress:  ex(/Mailing Address:\s*(.*?)(?:USDOT Number:|$)/),
-    dateScraped: crawlDate,
-    mcs150Date:    ex(/MCS-150 Form Date:\s*(.*?)(?:MCS-150 Mileage|$)/),
-    mcs150Mileage: ex(/MCS-150 Mileage \(Year\):\s*(.*?)(?:Operation Classification:|$)/),
+    phone:       getVal('Phone:'),
+    powerUnits:  getVal('Power Units:'),
+    drivers:     getVal('Drivers:'),                      // ✅ now gets full value
+    physicalAddress: getVal('Physical Address:'),         // ✅ now gets city/state/zip after <br>
+    mailingAddress:  getVal('Mailing Address:'),
+    dateScraped: new Date().toLocaleDateString('en-US'),
+    mcs150Date:    getVal('MCS-150 Form Date:'),
+    mcs150Mileage: getVal('MCS-150 Mileage (Year):'),    // ✅ now gets "(2023)" part too
     operationClassification: findMarkedLabels(doc, 'Operation Classification'),
     carrierOperation:        findMarkedLabels(doc, 'Carrier Operation'),
     cargoCarried:            findMarkedLabels(doc, 'Cargo Carried'),
-    outOfServiceDate: ex(/Out of Service Date:\s*(.*?)(?:Legal Name:|$)/),
-    stateCarrierId:   ex(/State Carrier ID Number:\s*(.*?)(?:MC\/MX\/FF Number\(s\):|$)/),
-    dunsNumber:       ex(/DUNS Number:\s*(.*?)(?:Power Units:|$)/),
-    safetyRating:     safety?.safetyRating     || 'NOT RATED',
-    safetyRatingDate: safety?.safetyRatingDate || '',
-    basicScores:      safety?.basicScores      || [],
-    oosRates:         safety?.oosRates         || []
+    outOfServiceDate: getVal('Out of Service Date:'),
+    stateCarrierId:   getVal('State Carrier ID Number:'),
+    dunsNumber:       getVal('DUNS Number:'),
+    safetyRating:     safety?.rating     || 'NOT RATED',
+    safetyRatingDate: safety?.ratingDate || '',
+    basicScores:      safety?.basicScores || [],
+    oosRates:         safety?.oosRates    || []
   };
 };
 
@@ -349,24 +326,24 @@ export const downloadCSV = (data: CarrierData[]) => {
     'BASIC Scores', 'OOS Rates'
   ];
 
-  const escape = (val: string | number | undefined) => {
+  const esc = (val: string | number | undefined) => {
     if (!val) return '""';
     return `"${String(val).replace(/"/g, '""')}"`;
   };
 
   const csvRows = data.map(row => [
-    escape(row.dateScraped), row.mcNumber, escape(row.email),
-    escape(row.entityType), escape(row.status), escape(row.outOfServiceDate),
-    escape(row.legalName), escape(row.dbaName), escape(row.physicalAddress),
-    escape(row.phone), escape(row.mailingAddress), escape(row.dotNumber),
-    escape(row.stateCarrierId), escape(row.powerUnits), escape(row.drivers),
-    escape(row.dunsNumber), escape(row.mcs150Date), escape(row.mcs150Mileage),
-    escape(row.operationClassification.join(', ')),
-    escape(row.carrierOperation.join(', ')),
-    escape(row.cargoCarried.join(', ')),
-    escape(row.safetyRating), escape(row.safetyRatingDate),
-    escape(row.basicScores?.map(s => `${s.category}: ${s.measure}`).join(' | ')),
-    escape(row.oosRates?.map(r => `${r.type}: ${r.oosPercent} (Avg: ${r.nationalAvg})`).join(' | '))
+    esc(row.dateScraped), row.mcNumber, esc(row.email),
+    esc(row.entityType), esc(row.status), esc(row.outOfServiceDate),
+    esc(row.legalName), esc(row.dbaName), esc(row.physicalAddress),
+    esc(row.phone), esc(row.mailingAddress), esc(row.dotNumber),
+    esc(row.stateCarrierId), esc(row.powerUnits), esc(row.drivers),
+    esc(row.dunsNumber), esc(row.mcs150Date), esc(row.mcs150Mileage),
+    esc(row.operationClassification.join(', ')),
+    esc(row.carrierOperation.join(', ')),
+    esc(row.cargoCarried.join(', ')),
+    esc(row.safetyRating), esc(row.safetyRatingDate),
+    esc(row.basicScores?.map((s: BasicScore) => `${s.category}: ${s.measure}`).join(' | ')),
+    esc(row.oosRates?.map((r: OosRate) => `${r.type}: ${r.rate} (Avg: ${r.nationalAvg})`).join(' | '))
   ]);
 
   const csv = [headers.join(','), ...csvRows.map(r => r.join(','))].join('\n');
@@ -379,3 +356,66 @@ export const downloadCSV = (data: CarrierData[]) => {
   link.click();
   document.body.removeChild(link);
 };
+
+// ============================================================
+// MOCK DATA
+// ============================================================
+const FIRST_NAMES = ['Logistics', 'Freight', 'Transport', 'Carrier', 'Hauling', 'Shipping', 'Express', 'Roadway'];
+const LAST_NAMES = ['Solutions', 'LLC', 'Inc', 'Group', 'Systems', 'Lines', 'Brothers', 'Global'];
+const CITIES = ['Chicago', 'Dallas', 'Atlanta', 'Los Angeles', 'Miami', 'New York'];
+const STATES = ['IL', 'TX', 'GA', 'CA', 'FL', 'NY'];
+const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1) + min);
+
+export const generateMockCarrier = (mc: string, b: boolean): CarrierData => {
+  const name1 = FIRST_NAMES[randomInt(0, FIRST_NAMES.length - 1)];
+  const name2 = LAST_NAMES[randomInt(0, LAST_NAMES.length - 1)];
+  const companyName = Math.random() > 0.3 ? `${name1} ${name2}` : `${name1} Services`;
+  const city = CITIES[randomInt(0, CITIES.length - 1)];
+  const state = STATES[randomInt(0, STATES.length - 1)];
+  return {
+    mcNumber: mc,
+    dotNumber: (parseInt(mc) + 1000000).toString(),
+    legalName: companyName,
+    dbaName: '',
+    entityType: b ? 'BROKER' : 'CARRIER',
+    status: 'AUTHORIZED FOR Property',
+    email: `contact@${companyName.toLowerCase().replace(/\s/g, '')}.com`,
+    phone: `(${randomInt(200, 900)}) ${randomInt(100, 999)}-${randomInt(1000, 9999)}`,
+    powerUnits: randomInt(1, 50).toString(),
+    drivers: randomInt(1, 60).toString(),
+    physicalAddress: `${randomInt(100, 9999)} Main St, ${city}, ${state} ${randomInt(10000, 99999)}`,
+    mailingAddress: '',
+    dateScraped: new Date().toLocaleDateString(),
+    mcs150Date: '01/01/2023',
+    mcs150Mileage: `${randomInt(50, 500)},000 (2023)`,
+    operationClassification: ['Auth. For Hire'],
+    carrierOperation: ['Interstate'],
+    cargoCarried: ['General Freight'],
+    outOfServiceDate: '',
+    stateCarrierId: '',
+    dunsNumber: '',
+    safetyRating: 'SATISFACTORY',
+    safetyRatingDate: '05/12/2022',
+    basicScores: [
+      { category: 'Unsafe Driving', measure: `${randomInt(0, 100)}%` },
+      { category: 'HOS Compliance', measure: `${randomInt(0, 100)}%` },
+      { category: 'Vehicle Maintenance', measure: `${randomInt(0, 100)}%` },
+      { category: 'Driver Fitness', measure: `${randomInt(0, 100)}%` }
+    ],
+    oosRates: [
+      { type: 'Vehicle', rate: `${randomInt(5, 25)}%`, nationalAvg: '21.4%' },
+      { type: 'Driver', rate: `${randomInt(1, 10)}%`, nationalAvg: '5.5%' },
+      { type: 'Hazmat', rate: '0%', nationalAvg: '4.5%' }
+    ]
+  };
+};
+
+export const MOCK_USERS: User[] = [
+  {
+    id: '1', name: 'Admin User', email: 'wooohan3@gmail.com', role: 'admin', plan: 'Enterprise',
+    dailyLimit: 100000, recordsExtractedToday: 450, lastActive: 'Now', ipAddress: '192.168.1.1',
+    isOnline: true, isBlocked: false
+  }
+];
+
+export const BLOCKED_IPS: BlockedIP[] = [];
