@@ -4,6 +4,8 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('❌ Missing Supabase environment variables');
+  console.error('Required: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY');
   throw new Error('Missing Supabase environment variables');
 }
 
@@ -43,8 +45,21 @@ export interface CarrierRecord {
   updated_at?: string;
 }
 
-export const saveCarrierToSupabase = async (carrier: any): Promise<{ success: boolean; error?: string }> => {
+/**
+ * Save a single carrier to Supabase with comprehensive error handling
+ */
+export const saveCarrierToSupabase = async (
+  carrier: any
+): Promise<{ success: boolean; error?: string; data?: any }> => {
   try {
+    // Validate required fields
+    if (!carrier.mcNumber || !carrier.dotNumber || !carrier.legalName) {
+      return {
+        success: false,
+        error: 'Missing required fields: mcNumber, dotNumber, or legalName',
+      };
+    }
+
     const record: CarrierRecord = {
       mc_number: carrier.mcNumber,
       dot_number: carrier.dotNumber,
@@ -75,20 +90,54 @@ export const saveCarrierToSupabase = async (carrier: any): Promise<{ success: bo
       insurance_policies: carrier.insurancePolicies || null,
     };
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('carriers')
       .upsert(record, { onConflict: 'mc_number' });
 
     if (error) {
-      console.error('Supabase save error:', error);
-      return { success: false, error: error.message };
+      console.error('❌ Supabase save error:', error);
+      return {
+        success: false,
+        error: `Database error: ${error.message}`,
+      };
     }
 
-    return { success: true };
+    console.log('✅ Carrier saved successfully:', carrier.mcNumber);
+    return { success: true, data };
   } catch (err: any) {
-    console.error('Exception saving to Supabase:', err);
-    return { success: false, error: err.message };
+    console.error('❌ Exception saving to Supabase:', err);
+    return {
+      success: false,
+      error: `Exception: ${err.message}`,
+    };
   }
+};
+
+/**
+ * Save multiple carriers in batch
+ */
+export const saveCarriersToSupabase = async (
+  carriers: any[]
+): Promise<{ success: boolean; error?: string; saved: number; failed: number }> => {
+  let saved = 0;
+  let failed = 0;
+
+  for (const carrier of carriers) {
+    const result = await saveCarrierToSupabase(carrier);
+    if (result.success) {
+      saved++;
+    } else {
+      failed++;
+      console.warn(`Failed to save carrier ${carrier.mcNumber}:`, result.error);
+    }
+  }
+
+  return {
+    success: failed === 0,
+    saved,
+    failed,
+    error: failed > 0 ? `${failed} carriers failed to save` : undefined,
+  };
 };
 
 export interface CarrierFilters {
@@ -239,7 +288,7 @@ export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): P
     const { data, error } = await query;
 
     if (error) {
-      console.error('Supabase fetch error:', error);
+      console.error('❌ Supabase fetch error:', error);
       return [];
     }
 
@@ -295,8 +344,54 @@ export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): P
 
     return results;
   } catch (err) {
-    console.error('Exception fetching from Supabase:', err);
+    console.error('❌ Exception fetching from Supabase:', err);
     return [];
+  }
+};
+
+/**
+ * Delete carrier by MC number
+ */
+export const deleteCarrier = async (
+  mcNumber: string
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const { error } = await supabase
+      .from('carriers')
+      .delete()
+      .eq('mc_number', mcNumber);
+
+    if (error) {
+      console.error('❌ Supabase delete error:', error);
+      return { success: false, error: error.message };
+    }
+
+    console.log('✅ Carrier deleted:', mcNumber);
+    return { success: true };
+  } catch (err: any) {
+    console.error('❌ Exception deleting carrier:', err);
+    return { success: false, error: err.message };
+  }
+};
+
+/**
+ * Get carrier count
+ */
+export const getCarrierCount = async (): Promise<number> => {
+  try {
+    const { count, error } = await supabase
+      .from('carriers')
+      .select('*', { count: 'exact', head: true });
+
+    if (error) {
+      console.error('❌ Error getting carrier count:', error);
+      return 0;
+    }
+
+    return count || 0;
+  } catch (err) {
+    console.error('❌ Exception getting carrier count:', err);
+    return 0;
   }
 };
 
@@ -311,10 +406,11 @@ export const updateCarrierInsurance = async (dotNumber: string, insuranceData: a
       .eq('dot_number', dotNumber);
 
     if (error) {
-      console.error('Supabase update error:', error);
+      console.error('❌ Supabase update error:', error);
       return { success: false, error: error.message };
     }
 
+    console.log('✅ Insurance data updated for DOT:', dotNumber);
     return { success: true };
   } catch (err: any) {
     console.error('Exception updating Supabase:', err);
@@ -336,10 +432,11 @@ export const updateCarrierSafety = async (dotNumber: string, safetyData: any): P
       .eq('dot_number', dotNumber);
 
     if (error) {
-      console.error('Supabase safety update error:', error);
+      console.error('❌ Supabase safety update error:', error);
       return { success: false, error: error.message };
     }
 
+    console.log('✅ Safety data updated for DOT:', dotNumber);
     return { success: true };
   } catch (err: any) {
     console.error('Exception updating safety data:', err);
