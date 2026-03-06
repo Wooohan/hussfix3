@@ -13,34 +13,26 @@ interface InsuranceScraperProps {
   autoStart?: boolean;
 }
 
-// ── Save insurance policies directly to Supabase insurance table ──
+// ── Save insurance to carriers.insurance_policies JSON column ──
 const saveInsuranceToSupabase = async (
   dot: string,
-  mcNumber: string,
   policies: InsurancePolicy[]
 ): Promise<{ success: boolean; error?: string }> => {
   try {
-    if (policies.length === 0) return { success: true };
-
-    // Delete old policies for this DOT first (upsert pattern)
-    await supabase.from('insurance_policies').delete().eq('dot_number', dot);
-
-    // Insert all new policies
-    const rows = policies.map(p => ({
-      dot_number:      dot,
-      mc_number:       mcNumber,
-      carrier:         p.carrier,
-      policy_number:   p.policyNumber,
-      effective_date:  p.effectiveDate,
-      coverage_amount: p.coverageAmount,
-      type:            p.type,
-      class:           p.class,
-      scraped_at:      new Date().toISOString(),
+    const jsonPolicies = policies.map(p => ({
+      dot,
+      type:           p.type,
+      class:          p.class,
+      carrier:        p.carrier,
+      policyNumber:   p.policyNumber,
+      effectiveDate:  p.effectiveDate,
+      coverageAmount: p.coverageAmount,
     }));
-
-    const { error } = await supabase.from('insurance_policies').insert(rows);
+    const { error } = await supabase
+      .from('carriers')
+      .update({ insurance_policies: jsonPolicies })
+      .eq('dot_number', dot);
     if (error) return { success: false, error: error.message };
-
     return { success: true };
   } catch (e: any) {
     return { success: false, error: e.message };
@@ -150,7 +142,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({
         setDotResult({ dot, policies: result.policies });
 
         // Also save to Supabase
-        await saveInsuranceToSupabase(dot, '', result.policies);
+        await saveInsuranceToSupabase(dot, result.policies);
       }
     } catch (e: any) {
       setDotError(`Error fetching DOT #${dot}: ${e.message}`);
@@ -251,8 +243,8 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({
         // Update carrier object
         updated[index] = { ...updated[index], insurancePolicies: result.policies };
 
-        // ✅ Save directly to Supabase insurance_policies table
-        const saveResult = await saveInsuranceToSupabase(dot, carrier.mcNumber, result.policies);
+        // ✅ Save to carriers.insurance_policies JSON column
+        const saveResult = await saveInsuranceToSupabase(dot, result.policies);
 
         setStats(s => ({
           ...s,
