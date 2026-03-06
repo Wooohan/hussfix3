@@ -6,7 +6,7 @@ import { updateCarrierInsurance, supabase } from '../services/supabaseClient';
 
 // High concurrency — searchcarriers.com is a private API, not FMCSA
 // No rate limiting risk, run as fast as possible
-const CONCURRENCY = 10;
+const CONCURRENCY = 5;
 
 interface InsuranceScraperProps {
   carriers: CarrierData[];
@@ -54,8 +54,39 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({
         .gte('mc_number', mcRangeStart)
         .lte('mc_number', mcRangeEnd);
       if (error) throw error;
-      setMcRangeCarriers(data || []);
-      log(`✅ Loaded ${data?.length || 0} carriers from DB range.`);
+
+      // Supabase returns snake_case columns — map to camelCase CarrierData
+      const mapped = (data || []).map((row: any) => ({
+        mcNumber:       row.mc_number       || row.mcNumber       || '',
+        dotNumber:      row.dot_number      || row.dotNumber      || '',
+        legalName:      row.legal_name      || row.legalName      || '',
+        dbaName:        row.dba_name        || row.dbaName        || '',
+        entityType:     row.entity_type     || row.entityType     || '',
+        status:         row.status          || '',
+        email:          row.email           || '',
+        phone:          row.phone           || '',
+        powerUnits:     row.power_units     || row.powerUnits     || '',
+        drivers:        row.drivers         || '',
+        physicalAddress: row.physical_address || row.physicalAddress || '',
+        mailingAddress:  row.mailing_address  || row.mailingAddress  || '',
+        dateScraped:    row.date_scraped    || row.dateScraped    || '',
+        mcs150Date:     row.mcs150_date     || row.mcs150Date     || '',
+        mcs150Mileage:  row.mcs150_mileage  || row.mcs150Mileage  || '',
+        operationClassification: row.operation_classification || row.operationClassification || [],
+        carrierOperation:        row.carrier_operation        || row.carrierOperation        || [],
+        cargoCarried:            row.cargo_carried            || row.cargoCarried            || [],
+        outOfServiceDate: row.out_of_service_date || row.outOfServiceDate || '',
+        stateCarrierId:   row.state_carrier_id   || row.stateCarrierId   || '',
+        dunsNumber:       row.duns_number         || row.dunsNumber       || '',
+        safetyRating:     row.safety_rating       || row.safetyRating     || '',
+        safetyRatingDate: row.safety_rating_date  || row.safetyRatingDate || '',
+        basicScores:      row.basic_scores        || row.basicScores      || [],
+        oosRates:         row.oos_rates           || row.oosRates         || [],
+        insurancePolicies: row.insurance_policies || row.insurancePolicies || [],
+      }));
+
+      setMcRangeCarriers(mapped);
+      log(`✅ Loaded ${mapped.length} carriers from DB range.`);
     } catch (err: any) {
       log(`❌ DB Error: ${err.message}`);
     }
