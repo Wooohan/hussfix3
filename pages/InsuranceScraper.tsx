@@ -5,7 +5,7 @@ import { fetchInsuranceData } from '../services/mockService';
 import { supabase } from '../services/supabaseClient';
 
 // High concurrency — searchcarriers.com is a private API, not FMCSA
-const CONCURRENCY = 10;
+const CONCURRENCY = 1;
 
 interface InsuranceScraperProps {
   carriers: CarrierData[];
