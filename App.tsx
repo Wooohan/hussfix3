@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './pages/Dashboard';
 import { Scraper } from './pages/Scraper';
@@ -8,9 +8,9 @@ import { Subscription } from './pages/Subscription';
 import { Landing } from './pages/Landing';
 import { AdminPanel } from './pages/AdminPanel';
 import { FMCSARegister } from './pages/FMCSARegister';
-// Added placeholder import for InsuranceScraper
 import { ViewState, User, CarrierData } from './types';
 import { Settings as SettingsIcon } from 'lucide-react';
+import { MOCK_USERS } from './services/mockService';
 import { fetchCarriersFromSupabase, CarrierFilters } from './services/supabaseClient';
 
 // Extracted Settings component to keep the main App clean.
@@ -43,21 +43,19 @@ const App: React.FC = () => {
 
   // Load default 200 carriers from Supabase on mount
   useEffect(() => {
-    if (user) { // Only load carriers if a user is logged in
-      const loadCarriers = async () => {
-        try {
-          setIsLoadingCarriers(true);
-          const carriers = await fetchCarriersFromSupabase({});
-          setAllCarriers(carriers || []);
-        } catch (error) {
-          console.error("Failed to fetch carriers:", error);
-        } finally {
-          setIsLoadingCarriers(false);
-        }
-      };
-      loadCarriers();
-    }
-  }, [user]); // Re-run if the user logs in
+    const loadCarriers = async () => {
+      try {
+        setIsLoadingCarriers(true);
+        const carriers = await fetchCarriersFromSupabase({});
+        setAllCarriers(carriers || []);
+      } catch (error) {
+        console.error("Failed to fetch carriers:", error);
+      } finally {
+        setIsLoadingCarriers(false);
+      }
+    };
+    loadCarriers();
+  }, []);
 
   const handleCarrierSearch = async (filters: CarrierFilters) => {
     try {
@@ -92,24 +90,27 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setUser(null);
-    // Clear localStorage on logout
     localStorage.removeItem('hussfix_user');
     localStorage.removeItem('hussfix_view');
-    setCurrentView('dashboard'); // Reset view state
+    setCurrentView('dashboard');
   };
 
   const handleUpdateUsage = (count: number) => {
     if (!user) return;
-    // **FIX: Removed the logic that tried to access MOCK_USERS**
-    // The user state is managed by React and persisted to localStorage, which is sufficient.
     const updatedUser: User = {
       ...user,
       recordsExtractedToday: user.recordsExtractedToday + count
     };
     setUser(updatedUser);
+
+    const dbIndex = MOCK_USERS.findIndex(u => u.id === user.id);
+    if (dbIndex !== -1) {
+      MOCK_USERS[dbIndex] = updatedUser;
+    }
   };
 
   const handleNewCarriers = (newData: CarrierData[]) => {
+    // Store the cycle carriers separately
     setCycleCarriers(newData);
     
     setAllCarriers(prev => {
@@ -191,9 +192,12 @@ const App: React.FC = () => {
     }
   };
 
+  // If no user in state but localStorage has one, user was restored from localStorage
   if (!user) {
     return <Landing onLogin={handleLogin} />
   }
+
+  // User is authenticated (either logged in or restored from localStorage)
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-indigo-500/30">
@@ -204,7 +208,7 @@ const App: React.FC = () => {
         onLogout={handleLogout}
       />
       
-      <main className="flex-1 ml-64 relative bg-[url('https://grainy-gradients.vercel.app/noise.svg' )] bg-opacity-20 h-screen overflow-hidden">
+      <main className="flex-1 ml-64 relative bg-[url('https://grainy-gradients.vercel.app/noise.svg')] bg-opacity-20 h-screen overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-96 bg-indigo-600/10 blur-[100px] pointer-events-none rounded-full -translate-y-1/2"></div>
         {user && renderContent()}
       </main>
