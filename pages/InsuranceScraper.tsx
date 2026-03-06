@@ -5,7 +5,7 @@ import { fetchInsuranceData } from '../services/mockService';
 import { updateCarrierInsurance, supabase } from '../services/supabaseClient';
 
 // High concurrency — searchcarriers.com is a private API, not FMCSA
-const CONCURRENCY = 3;
+const CONCURRENCY = 1;
 const SAVE_BATCH_SIZE = 1000;
 const SAVE_PAUSE_DURATION = 60000; // 60 seconds
 
