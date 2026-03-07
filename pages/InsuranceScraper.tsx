@@ -1,5 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, Play, Database, SearchIcon, ClipboardList, Loader2, Zap, Hash, ArrowRight, XCircle, CheckCircle2 } from 'lucide-material';
+import { 
+  ShieldCheck, 
+  Play, 
+  Database, 
+  SearchIcon, 
+  ClipboardList, 
+  Loader2, 
+  Zap, 
+  Hash, 
+  ArrowRight, 
+  XCircle, 
+  CheckCircle2 
+} from 'lucide-react'; // Make sure this says 'lucide-react'
 import { CarrierData } from '../types';
 import { fetchInsuranceData } from '../services/mockService';
 import { updateCarrierInsurance, getCarriersByMCRange } from '../services/supabaseClient';
