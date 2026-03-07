@@ -16,11 +16,9 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
   const [progress, setProgress] = useState(0);
   const [stats, setStats] = useState({ total: 0, insFound: 0, insFailed: 0, dbSaved: 0 });
   
-  // Range State
   const [rangeStart, setRangeStart] = useState('');
   const [rangeEnd, setRangeEnd] = useState('');
 
-  // Manual Lookup State
   const [manualDot, setManualDot] = useState('');
   const [isManualLoading, setIsManualLoading] = useState(false);
   const [manualResult, setManualResult] = useState<{policies: InsurancePolicy[]} | null>(null);
@@ -53,14 +51,12 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
     
     setLogs(prev => [...prev, `🚀 ENGINE INITIALIZED: Insurance Enrichment...`]);
     setLogs(prev => [...prev, `🔍 Targeting: ${targetList.length} USDOT records`]);
-    setLogs(prev => [...prev, `💾 Real-time Supabase Sync: ENABLED`]);
     
     const updatedCarriers = [...carriers]; 
     let currentInsFound = 0;
     let currentInsFailed = 0;
     let currentDbSaved = 0;
 
-    // --- SEQUENTIAL SCRAPE & SYNC PIPELINE ---
     for (let i = 0; i < targetList.length; i++) {
       if (!isRunningRef.current) break;
 
@@ -68,53 +64,50 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
       setLogs(prev => [...prev, `⏳ [INSURANCE] [${i+1}/${targetList.length}] Querying DOT: ${dot}...`]);
       
       try {
-        // 1. Fetch from FMCSA API
+        // 1. EXTRACTION
         const { policies } = await fetchInsuranceData(dot);
         
-        // Update local memory state for UI
         const indexInFullList = updatedCarriers.findIndex(c => c.dotNumber === dot);
         if (indexInFullList !== -1) {
           updatedCarriers[indexInFullList] = { ...updatedCarriers[indexInFullList], insurancePolicies: policies };
         }
-        
+
         if (policies.length > 0) {
           currentInsFound++;
           setLogs(prev => [...prev, `✨ Success: Extracted ${policies.length} insurance filings for ${dot}`]);
+          
+          // 2. IMMEDIATE SYNC (Only if data found)
+          try {
+            const res = await updateCarrierInsurance(dot, { policies });
+            if (res) {
+              currentDbSaved++;
+              setLogs(prev => [...prev, `✅ DB Sync: Record ${dot} updated successfully`]);
+            }
+          } catch (syncErr) {
+            setLogs(prev => [...prev, `❌ DB Fail: Could not sync ${dot}`]);
+          }
         } else {
           setLogs(prev => [...prev, `⚠️ Info: No active insurance found for ${dot}`]);
         }
-
-        // 2. Immediate Supabase Sync after Scrape
-        try {
-          const res = await updateCarrierInsurance(dot, { policies });
-          if (res) {
-            currentDbSaved++;
-            setLogs(prev => [...prev, `✅ DB Sync: Record ${dot} updated successfully`]);
-          }
-        } catch (syncErr) {
-          setLogs(prev => [...prev, `❌ Sync Error: Database update failed for ${dot}`]);
-        }
-
       } catch (err) {
         currentInsFailed++;
         setLogs(prev => [...prev, `❌ Fail: Insurance timeout for DOT ${dot}`]);
       }
 
-      // Update States
+      // Update UI Counters
       setProgress(Math.round(((i + 1) / targetList.length) * 100));
       setStats(prev => ({ 
         ...prev, 
         insFound: currentInsFound, 
-        insFailed: currentInsFailed,
+        insFailed: currentInsFailed, 
         dbSaved: currentDbSaved 
       }));
       
-      // Batch update the main carrier list to refresh the UI table
       if ((i + 1) % 3 === 0 || (i + 1) === targetList.length) {
           onUpdateCarriers([...updatedCarriers]);
       }
 
-      // 1-second delay to prevent rate-limiting
+      // Throttle for API stability
       await new Promise(r => setTimeout(r, 1000));
     }
 
@@ -150,6 +143,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
 
   return (
     <div className="p-8 h-screen flex flex-col overflow-hidden bg-[#0a0c10] text-slate-200">
+      {/* Header Container */}
       <div className="flex justify-between items-center mb-10 bg-slate-900/40 p-6 rounded-3xl border border-white/5 backdrop-blur-md">
         <div>
           <h1 className="text-4xl font-black text-white bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-500">
@@ -172,6 +166,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
       <div className="grid grid-cols-12 gap-8 flex-1 min-h-0">
         <div className="col-span-12 lg:col-span-4 space-y-6 overflow-y-auto pr-2 custom-scrollbar">
           
+          {/* Range Controller */}
           <div className="bg-slate-900/40 border border-white/5 p-6 rounded-[2rem]">
             <h3 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
               <Hash size={16} /> MC Range Scraper
@@ -186,6 +181,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
             </button>
           </div>
 
+          {/* Quick Lookup */}
           <div className="bg-slate-900/40 border border-white/5 p-6 rounded-[2rem]">
              <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-6 flex items-center gap-3">
                 <SearchIcon size={16} className="text-indigo-400" /> Quick Policy Lookup
@@ -196,6 +192,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
              </form>
           </div>
 
+          {/* Counter Display */}
           <div className="bg-gradient-to-br from-indigo-600 to-purple-700 p-8 rounded-[2rem] shadow-2xl relative overflow-hidden">
             <h3 className="text-xs font-black text-white/60 uppercase tracking-[0.2em] mb-6 flex items-center gap-3"><Database size={16}/> Live Counters</h3>
             <div className="grid grid-cols-2 gap-6 relative z-10">
@@ -217,6 +214,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
           </div>
         </div>
 
+        {/* Logging Terminal */}
         <div className="col-span-12 lg:col-span-8 flex flex-col bg-black/40 rounded-[2.5rem] border border-white/5 overflow-hidden">
           <div className="bg-slate-900/40 p-5 border-b border-white/5 px-10 flex justify-between items-center text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
             Insurance Pipeline Stream
