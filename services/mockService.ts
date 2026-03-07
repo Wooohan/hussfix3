@@ -181,6 +181,106 @@ export const fetchSafetyData = async (dot: string): Promise<{
 };
 
 // ============================================================
+// INSPECTION DATA — exported for main scraper
+// Fetches FMCSA inspection history and violations
+// ============================================================
+export const fetchInspectionData = async (dot: string): Promise<{
+  inspections: any[];
+}> => {
+  if (!dot) return { inspections: [] };
+
+  const html = await fetchFmcsa(
+    `https://ai.fmcsa.dot.gov/SMS/Carrier/${dot}/CompleteProfile.aspx`
+  );
+  if (!html) return { inspections: [] };
+
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const inspections: any[] = [];
+
+  try {
+    // Find the inspection table
+    const table = doc.querySelector('table[id="inspectionTable"]');
+    if (!table) return { inspections: [] };
+
+    const tbody = table.querySelector('tbody.dataBody');
+    if (!tbody) return { inspections: [] };
+
+    const rows = tbody.querySelectorAll('tr');
+    let currentReport: any = null;
+
+    rows.forEach((row) => {
+      const rowClasses = row.getAttribute('class') || '';
+
+      // Detect new inspection
+      if (rowClasses.includes('inspection')) {
+        if (currentReport) {
+          inspections.push(currentReport);
+        }
+
+        const cols = row.querySelectorAll('td');
+        if (cols.length >= 3) {
+          currentReport = {
+            reportNumber: cleanText(cols[1]?.textContent),
+            location: cleanText(cols[2]?.textContent),
+            date: cleanText(cols[0]?.textContent),
+            oosViolations: 0,
+            driverViolations: 0,
+            vehicleViolations: 0,
+            hazmatViolations: 0,
+            violationList: []
+          };
+        }
+      }
+      // Categorize violations
+      else if (rowClasses.includes('viol') && currentReport) {
+        const label = row.querySelector('label')?.textContent || '';
+        const violDescElement = row.querySelector('span.violCodeDesc');
+        const violDesc = violDescElement ? cleanText(violDescElement.textContent) : '';
+        const weightElement = row.querySelector('td.weight');
+        const violWeight = weightElement ? cleanText(weightElement.textContent) : '';
+
+        const fullDetail = {
+          label: cleanText(label),
+          description: violDesc,
+          weight: violWeight
+        };
+
+        currentReport.violationList.push(fullDetail);
+
+        // Count violations by type
+        const labelLower = label.toLowerCase();
+        if (rowClasses.includes('oos') || violDesc.toLowerCase().includes('(oos)')) {
+          currentReport.oosViolations++;
+        }
+        if (labelLower.includes('vehicle maint')) {
+          currentReport.vehicleViolations++;
+        } else if (
+          labelLower.includes('driver fitness') ||
+          labelLower.includes('unsafe driving') ||
+          labelLower.includes('hos compliance') ||
+          labelLower.includes('drugs/alcohol')
+        ) {
+          currentReport.driverViolations++;
+        } else if (labelLower.includes('hazmat') || labelLower.includes('hm compliance')) {
+          currentReport.hazmatViolations++;
+        } else {
+          currentReport.vehicleViolations++;
+        }
+      }
+    });
+
+    // Add last inspection if exists
+    if (currentReport) {
+      inspections.push(currentReport);
+    }
+  } catch (e) {
+    console.error('Error parsing inspection data:', e);
+  }
+
+  return { inspections };
+};
+
+// ============================================================
 // INSURANCE DATA — exported for InsuranceScraper
 // hits searchcarriers.com API directly (no FMCSA, no proxy needed)
 // ============================================================
@@ -274,13 +374,14 @@ export const scrapeRealCarrier = async (
   let status = getVal('Operating Authority Status:');
   status = status.replace(/(\*Please Note|Please Note|For Licensing)[\s\S]*/i, '').replace(/\s+/g, ' ').trim();
 
-  // ── Requests 2 & 3: Email + Safety (parallel) ──
-  const [email, safety] = dotNumber
+  // ── Requests 2, 3, & 4: Email + Safety + Inspections (parallel) ──
+  const [email, safety, inspectionData] = dotNumber
     ? await Promise.all([
         findDotEmail(dotNumber),
-        fetchSafetyData(dotNumber)
+        fetchSafetyData(dotNumber),
+        fetchInspectionData(dotNumber)
       ])
-    : ['', null];
+    : ['', null, null];
 
   const cleanEmail = email.replace(/Â|\[|\]/g, '').trim();
 
@@ -309,7 +410,8 @@ export const scrapeRealCarrier = async (
     safetyRating:     safety?.rating     || 'NOT RATED',
     safetyRatingDate: safety?.ratingDate || '',
     basicScores:      safety?.basicScores || [],
-    oosRates:         safety?.oosRates    || []
+    oosRates:         safety?.oosRates    || [],
+    inspections:      inspectionData?.inspections || []
   };
 };
 
@@ -323,7 +425,7 @@ export const downloadCSV = (data: CarrierData[]) => {
     'State Carrier ID Number', 'Power Units', 'Drivers', 'DUNS Number',
     'MCS-150 Form Date', 'MCS-150 Mileage (Year)', 'Operation Classification',
     'Carrier Operation', 'Cargo Carried', 'Safety Rating', 'Rating Date',
-    'BASIC Scores', 'OOS Rates'
+    'BASIC Scores', 'OOS Rates', 'Inspections'
   ];
 
   const esc = (val: string | number | undefined) => {
@@ -343,7 +445,8 @@ export const downloadCSV = (data: CarrierData[]) => {
     esc(row.cargoCarried.join(', ')),
     esc(row.safetyRating), esc(row.safetyRatingDate),
     esc(row.basicScores?.map((s: BasicScore) => `${s.category}: ${s.measure}`).join(' | ')),
-    esc(row.oosRates?.map((r: OosRate) => `${r.type}: ${r.rate} (Avg: ${r.nationalAvg})`).join(' | '))
+    esc(row.oosRates?.map((r: OosRate) => `${r.type}: ${r.rate} (Avg: ${r.nationalAvg})`).join(' | ')),
+    esc(row.inspections?.map((i: any) => `Report ${i.reportNumber}: ${i.oosViolations} OOS, ${i.driverViolations} Driver, ${i.vehicleViolations} Vehicle, ${i.hazmatViolations} Hazmat`).join(' | '))
   ]);
 
   const csv = [headers.join(','), ...csvRows.map(r => r.join(','))].join('\n');
