@@ -140,6 +140,169 @@ const MinMaxInputs: React.FC<{
   </div>
 );
 
+// New Inspection History Component
+interface Violation {
+  label: string;
+  weight: string;
+  description: string;
+}
+
+interface Inspection {
+  date: string;
+  location: string;
+  reportNumber: string;
+  oosViolations: number;
+  driverViolations?: number;
+  vehicleViolations?: number;
+  hazmatViolations?: number;
+  violationList?: Violation[];
+}
+
+const InspectionHistory: React.FC<{ inspections: Inspection[] }> = ({ inspections }) => {
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null);
+
+  const handleRowHover = (index: number, event: React.MouseEvent<HTMLDivElement>) => {
+    setHoveredIndex(index);
+    const rect = event.currentTarget.getBoundingClientRect();
+    setTooltipPosition({
+      x: rect.right + 10,
+      y: rect.top,
+    });
+  };
+
+  const handleRowLeave = () => {
+    setHoveredIndex(null);
+    setTooltipPosition(null);
+  };
+
+  const toggleExpand = (index: number) => {
+    setExpandedIndex(expandedIndex === index ? null : index);
+  };
+
+  return (
+    <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col shadow-2xl relative">
+      <div className="flex items-center gap-3 mb-8">
+        <Activity size={20} className="text-orange-400" />
+        <h4 className="text-xl font-black text-white uppercase tracking-tight">Inspection History</h4>
+      </div>
+
+      <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-2">
+        {inspections && inspections.length > 0 ? (
+          inspections.slice(0, 10).map((insp: Inspection, i: number) => (
+            <div key={i} className="relative">
+              {/* Main Inspection Row */}
+              <div
+                className="bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-sm hover:border-orange-500/50 transition-all cursor-pointer group"
+                onClick={() => toggleExpand(i)}
+                onMouseEnter={(e) => handleRowHover(i, e)}
+                onMouseLeave={handleRowLeave}
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest border border-orange-500/20 bg-orange-500/5 px-2 py-1 rounded">
+                        {insp.date}
+                      </span>
+                      <span className="text-xs font-bold text-slate-400">{insp.location}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-mono">Report #: {insp.reportNumber}</p>
+                  </div>
+                  <ChevronDown
+                    size={18}
+                    className={`text-slate-500 transition-transform ${expandedIndex === i ? 'rotate-180' : ''}`}
+                  />
+                </div>
+
+                {/* Violation Summary Grid */}
+                <div className="grid grid-cols-4 gap-2">
+                  <div className="bg-slate-800/50 p-3 rounded border border-slate-700">
+                    <span className="text-[9px] text-slate-500 block font-bold uppercase">OOS Violations</span>
+                    <span className="text-lg font-black text-orange-400">{insp.oosViolations}</span>
+                  </div>
+                  <div className="bg-slate-800/50 p-3 rounded border border-slate-700">
+                    <span className="text-[9px] text-slate-500 block font-bold uppercase">Driver Violations</span>
+                    <span className="text-lg font-black text-orange-400">{insp.driverViolations || 0}</span>
+                  </div>
+                  <div className="bg-slate-800/50 p-3 rounded border border-slate-700">
+                    <span className="text-[9px] text-slate-500 block font-bold uppercase">Vehicle Violations</span>
+                    <span className="text-lg font-black text-orange-400">{insp.vehicleViolations || 0}</span>
+                  </div>
+                  <div className="bg-slate-800/50 p-3 rounded border border-slate-700">
+                    <span className="text-[9px] text-slate-500 block font-bold uppercase">Hazmat Violations</span>
+                    <span className="text-lg font-black text-orange-400">{insp.hazmatViolations || 0}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Expanded Violation Details */}
+              {expandedIndex === i && insp.violationList && insp.violationList.length > 0 && (
+                <div className="mt-2 bg-slate-800/30 border border-slate-700 rounded-xl p-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <h5 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-orange-400 rounded-full" />
+                    Violation Details
+                  </h5>
+                  <div className="space-y-3 max-h-96 overflow-y-auto custom-scrollbar">
+                    {insp.violationList.map((violation, vIdx) => (
+                      <div key={vIdx} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
+                        <div className="flex items-start justify-between mb-2">
+                          <span className="text-[10px] font-bold text-orange-300 uppercase">{violation.label}</span>
+                          <span className="text-[10px] font-mono bg-slate-800 px-2 py-1 rounded text-slate-400">
+                            Weight: {violation.weight}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">{violation.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Hover Popup Card */}
+              {hoveredIndex === i && insp.violationList && insp.violationList.length > 0 && tooltipPosition && (
+                <div
+                  className="fixed z-50 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-4 w-96 max-h-96 overflow-y-auto custom-scrollbar"
+                  style={{
+                    left: `${tooltipPosition.x}px`,
+                    top: `${tooltipPosition.y}px`,
+                  }}
+                >
+                  <div className="mb-4 pb-3 border-b border-slate-700">
+                    <h6 className="text-xs font-black text-orange-400 uppercase tracking-widest">
+                      Violation Details - {insp.reportNumber}
+                    </h6>
+                    <p className="text-[10px] text-slate-500 mt-1">{insp.location} • {insp.date}</p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {insp.violationList.map((violation, vIdx) => (
+                      <div key={vIdx} className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                        <div className="flex items-start justify-between mb-2">
+                          <span className="text-[10px] font-bold text-orange-300 uppercase">{violation.label}</span>
+                          <span className="text-[10px] font-mono bg-slate-900 px-2 py-0.5 rounded text-orange-400 font-bold">
+                            {violation.weight}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-300 leading-relaxed">{violation.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))
+        ) : (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-700 text-center">
+            <Activity size={48} className="opacity-10 mb-4" />
+            <p className="text-xs font-black uppercase tracking-widest text-slate-500">No Inspections Found</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch, isLoading, onNavigateToInsurance }) => {
   const [mcSearchTerm, setMcSearchTerm] = useState('');
   const [nameSearchTerm, setNameSearchTerm] = useState('');
@@ -697,95 +860,8 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   )}
                 </div>
 
-                {/* UPDATED INSPECTION HISTORY SECTION */}
-                <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col shadow-2xl">
-                  <div className="flex items-center gap-3 mb-8">
-                    <Activity size={20} className="text-emerald-400" />
-                    <h4 className="text-xl font-black text-white uppercase tracking-tight">Inspection History</h4>
-                  </div>
-                  <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-2">
-                    {selectedCarrier.inspections && selectedCarrier.inspections.length > 0 ? (
-                      selectedCarrier.inspections.slice(0, 10).map((insp: any, i: number) => {
-                        const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
-                        const isExpanded = expandedIndex === i;
-                        
-                        return (
-                          <div key={i} className="relative">
-                            {/* Main Inspection Row */}
-                            <div
-                              className="bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-sm hover:border-emerald-500/50 transition-all cursor-pointer"
-                              onClick={() => setExpandedIndex(isExpanded ? null : i)}
-                            >
-                              <div className="flex items-start justify-between mb-4">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-3 mb-2">
-                                    <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest border border-emerald-500/20 bg-emerald-500/5 px-2 py-1 rounded">
-                                      {insp.date}
-                                    </span>
-                                    <span className="text-xs font-bold text-slate-400">{insp.location}</span>
-                                  </div>
-                                  <p className="text-[11px] text-slate-500 font-mono">Report #: {insp.reportNumber}</p>
-                                </div>
-                                <ChevronDown
-                                  size={18}
-                                  className={`text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                                />
-                              </div>
-
-                              {/* Violation Summary Grid - 4 Columns */}
-                              <div className="grid grid-cols-4 gap-2">
-                                <div className="bg-slate-800/50 p-3 rounded border border-slate-700">
-                                  <span className="text-[9px] text-slate-500 block font-bold uppercase">OOS Violations</span>
-                                  <span className="text-lg font-black text-emerald-400">{insp.oosViolations || 0}</span>
-                                </div>
-                                <div className="bg-slate-800/50 p-3 rounded border border-slate-700">
-                                  <span className="text-[9px] text-slate-500 block font-bold uppercase">Driver Violations</span>
-                                  <span className="text-lg font-black text-emerald-400">{insp.driverViolations || 0}</span>
-                                </div>
-                                <div className="bg-slate-800/50 p-3 rounded border border-slate-700">
-                                  <span className="text-[9px] text-slate-500 block font-bold uppercase">Vehicle Violations</span>
-                                  <span className="text-lg font-black text-emerald-400">{insp.vehicleViolations || 0}</span>
-                                </div>
-                                <div className="bg-slate-800/50 p-3 rounded border border-slate-700">
-                                  <span className="text-[9px] text-slate-500 block font-bold uppercase">Hazmat Violations</span>
-                                  <span className="text-lg font-black text-emerald-400">{insp.hazmatViolations || 0}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Expanded Violation Details */}
-                            {isExpanded && insp.violationList && insp.violationList.length > 0 && (
-                              <div className="mt-2 bg-slate-800/30 border border-slate-700 rounded-xl p-4 animate-in fade-in slide-in-from-top-2 duration-200">
-                                <h5 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                  <span className="w-2 h-2 bg-emerald-400 rounded-full" />
-                                  Violation Details
-                                </h5>
-                                <div className="space-y-3 max-h-96 overflow-y-auto custom-scrollbar">
-                                  {insp.violationList.map((violation: any, vIdx: number) => (
-                                    <div key={vIdx} className="bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
-                                      <div className="flex items-start justify-between mb-2">
-                                        <span className="text-[10px] font-bold text-emerald-300 uppercase">{violation.label}</span>
-                                        <span className="text-[10px] font-mono bg-slate-800 px-2 py-1 rounded text-slate-400">
-                                          Weight: {violation.weight}
-                                        </span>
-                                      </div>
-                                      <p className="text-[11px] text-slate-400 leading-relaxed">{violation.description}</p>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="flex flex-col items-center justify-center py-20 text-slate-700 text-center">
-                        <Activity size={48} className="opacity-10 mb-4" />
-                        <p className="text-xs font-black uppercase tracking-widest text-slate-500">No Inspections Found</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                {/* NEW INSPECTION HISTORY COMPONENT */}
+                <InspectionHistory inspections={selectedCarrier.inspections || []} />
               </div>
 
             </div>
