@@ -41,6 +41,7 @@ export interface CarrierRecord {
   basic_scores?: any;
   oos_rates?: any;
   insurance_policies?: any;
+  inspections?: any;
   created_at?: string;
   updated_at?: string;
 }
@@ -88,6 +89,7 @@ export const saveCarrierToSupabase = async (
       basic_scores: carrier.basicScores || null,
       oos_rates: carrier.oosRates || null,
       insurance_policies: carrier.insurancePolicies || null,
+      inspections: carrier.inspections || null,
     };
 
     const { data, error } = await supabase
@@ -320,7 +322,8 @@ export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): P
       basicScores: record.basic_scores,
       oosRates: record.oos_rates,
       insurancePolicies: record.insurance_policies,
-    }));
+      inspections: record.inspections,
+    });
 
     // Post-fetch filtering for Years in Business (since mcs150_date is a string in various formats)
     if (filters.yearsInBusinessMin !== undefined || filters.yearsInBusinessMax !== undefined) {
