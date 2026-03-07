@@ -53,13 +53,14 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
     
     setLogs(prev => [...prev, `🚀 ENGINE INITIALIZED: Insurance Enrichment...`]);
     setLogs(prev => [...prev, `🔍 Targeting: ${targetList.length} USDOT records`]);
+    setLogs(prev => [...prev, `💾 Real-time Supabase Sync: ENABLED`]);
     
     const updatedCarriers = [...carriers]; 
-    const syncPayload: { dot: string; policies: InsurancePolicy[] }[] = [];
-    let insFound = 0;
-    let insFailed = 0;
+    let currentInsFound = 0;
+    let currentInsFailed = 0;
+    let currentDbSaved = 0;
 
-    // --- STAGE 1: EXTRACTION ---
+    // --- SEQUENTIAL SCRAPE & SYNC PIPELINE ---
     for (let i = 0; i < targetList.length; i++) {
       if (!isRunningRef.current) break;
 
@@ -67,52 +68,54 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
       setLogs(prev => [...prev, `⏳ [INSURANCE] [${i+1}/${targetList.length}] Querying DOT: ${dot}...`]);
       
       try {
+        // 1. Fetch from FMCSA API
         const { policies } = await fetchInsuranceData(dot);
         
+        // Update local memory state for UI
         const indexInFullList = updatedCarriers.findIndex(c => c.dotNumber === dot);
         if (indexInFullList !== -1) {
           updatedCarriers[indexInFullList] = { ...updatedCarriers[indexInFullList], insurancePolicies: policies };
         }
         
-        syncPayload.push({ dot, policies });
-
         if (policies.length > 0) {
-          insFound++;
+          currentInsFound++;
           setLogs(prev => [...prev, `✨ Success: Extracted ${policies.length} insurance filings for ${dot}`]);
         } else {
           setLogs(prev => [...prev, `⚠️ Info: No active insurance found for ${dot}`]);
         }
+
+        // 2. Immediate Supabase Sync after Scrape
+        try {
+          const res = await updateCarrierInsurance(dot, { policies });
+          if (res) {
+            currentDbSaved++;
+            setLogs(prev => [...prev, `✅ DB Sync: Record ${dot} updated successfully`]);
+          }
+        } catch (syncErr) {
+          setLogs(prev => [...prev, `❌ Sync Error: Database update failed for ${dot}`]);
+        }
+
       } catch (err) {
-        insFailed++;
+        currentInsFailed++;
         setLogs(prev => [...prev, `❌ Fail: Insurance timeout for DOT ${dot}`]);
       }
 
+      // Update States
       setProgress(Math.round(((i + 1) / targetList.length) * 100));
-      setStats(prev => ({ ...prev, insFound, insFailed }));
+      setStats(prev => ({ 
+        ...prev, 
+        insFound: currentInsFound, 
+        insFailed: currentInsFailed,
+        dbSaved: currentDbSaved 
+      }));
       
+      // Batch update the main carrier list to refresh the UI table
       if ((i + 1) % 3 === 0 || (i + 1) === targetList.length) {
           onUpdateCarriers([...updatedCarriers]);
       }
+
+      // 1-second delay to prevent rate-limiting
       await new Promise(r => setTimeout(r, 1000));
-    }
-
-    // --- STAGE 2: FINAL SYNC ---
-    if (syncPayload.length > 0) {
-      setLogs(prev => [...prev, `📂 STAGE: Saving to Supabase Database...`]);
-      let dbSaved = 0;
-
-      for (const item of syncPayload) {
-        try {
-          const res = await updateCarrierInsurance(item.dot, { policies: item.policies });
-          if (res) {
-            dbSaved++;
-            setStats(prev => ({ ...prev, dbSaved }));
-          }
-        } catch (e) {
-          setLogs(prev => [...prev, `❌ Sync Error for DOT ${item.dot}`]);
-        }
-      }
-      setLogs(prev => [...prev, `💾 Total Supabase updates: ${dbSaved}`]);
     }
 
     setIsProcessing(false);
@@ -161,7 +164,7 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
                 isProcessing ? 'bg-red-500/10 text-red-500 border border-red-500/50' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25'
             }`}
           >
-            {isProcessing ? <><Loader2 className="animate-spin" size={20} /> Stop & Sync</> : <><Zap size={20} /> Run Insurance Batch</>}
+            {isProcessing ? <><Loader2 className="animate-spin" size={20} /> Stop Scraper</> : <><Zap size={20} /> Run Insurance Batch</>}
           </button>
         </div>
       </div>
