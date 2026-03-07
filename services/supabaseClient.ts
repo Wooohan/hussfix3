@@ -323,7 +323,7 @@ export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): P
       oosRates: record.oos_rates,
       insurancePolicies: record.insurance_policies,
       inspections: record.inspections,
-    });
+    }));
 
     // Post-fetch filtering for Years in Business (since mcs150_date is a string in various formats)
     if (filters.yearsInBusinessMin !== undefined || filters.yearsInBusinessMax !== undefined) {
