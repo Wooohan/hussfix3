@@ -1,334 +1,296 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  ShieldCheck, Play, Download, Database, SearchIcon, 
-  ClipboardList, Loader2, CheckCircle2, Info, AlertCircle, 
-  ShieldAlert, Zap, Hash, ArrowRight, StopCircle 
-} from 'lucide-react';
+import { ShieldCheck, Play, Download, Database, SearchIcon, ClipboardList, Loader2, CheckCircle2, Info, AlertCircle, ShieldAlert, Zap } from 'lucide-react';
 import { CarrierData, InsurancePolicy } from '../types';
 import { fetchInsuranceData } from '../services/mockService';
-import { updateCarrierInsurance, getCarriersByMCRange } from '../services/supabaseClient';
+import { updateCarrierInsurance } from '../services/supabaseClient';
 
 interface InsuranceScraperProps {
-  carriers: CarrierData[];
-  onUpdateCarriers: (newData: CarrierData[]) => void;
-  autoStart?: boolean;
+  carriers: CarrierData[];
+  onUpdateCarriers: (newData: CarrierData[]) => void;
+  autoStart?: boolean;
 }
 
 export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, onUpdateCarriers, autoStart }) => {
-  // Processing State
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [logs, setLogs] = useState<{msg: string, type: 'info' | 'success' | 'error' | 'stage'}[]>([]);
-  const [progress, setProgress] = useState(0);
-  const [stats, setStats] = useState({ total: 0, insFound: 0, dbSaved: 0, failed: 0 });
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [currentStage, setCurrentStage] = useState<'IDLE' | 'INSURANCE'>('IDLE');
+  const [logs, setLogs] = useState<string[]>([]);
+  const [progress, setProgress] = useState(0);
+  const [stats, setStats] = useState({ 
+    total: 0, 
+    insFound: 0, 
+    insFailed: 0,
+    dbSaved: 0
+  });
+  
+  // Manual Lookup State
+  const [manualDot, setManualDot] = useState('');
+  const [isManualLoading, setIsManualLoading] = useState(false);
+  const [manualResult, setManualResult] = useState<{policies: InsurancePolicy[]} | null>(null);
 
-  // Range & Manual State
-  const [mcRange, setMcRange] = useState({ start: '', end: '' });
-  const [manualDot, setManualDot] = useState('');
-  const [isManualLoading, setIsManualLoading] = useState(false);
-  const [manualResult, setManualResult] = useState<{policies: InsurancePolicy[]} | null>(null);
+  const logsEndRef = useRef<HTMLDivElement>(null);
+  const isRunningRef = useRef(false);
+  const hasAutoStarted = useRef(false);
 
-  const logsEndRef = useRef<HTMLDivElement>(null);
-  const isRunningRef = useRef(false);
-  const hasAutoStarted = useRef(false);
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
 
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
+  // Handle Auto-Start from Live Scraper
+  useEffect(() => {
+    if (autoStart && carriers.length > 0 && !isProcessing && !hasAutoStarted.current) {
+      hasAutoStarted.current = true;
+      startEnrichmentProcess();
+    }
+  }, [autoStart, carriers]);
 
-  // Auto-Start Logic
-  useEffect(() => {
-    if (autoStart && carriers.length > 0 && !isProcessing && !hasAutoStarted.current) {
-      hasAutoStarted.current = true;
-      startEnrichmentProcess(carriers);
-    }
-  }, [autoStart, carriers]);
+  const startEnrichmentProcess = async () => {
+    if (isProcessing) return;
+    if (carriers.length === 0) {
+      setLogs(prev => [...prev, "❌ Error: No carriers found in database. Load carriers first."]);
+      return;
+    }
 
-  const addLog = (msg: string, type: 'info' | 'success' | 'error' | 'stage' = 'info') => {
-    setLogs(prev => [...prev.slice(-100), { msg, type }]);
-  };
+    setIsProcessing(true);
+    isRunningRef.current = true;
+    setLogs(prev => [...prev, `🚀 ENGINE INITIALIZED: Insurance Enrichment...`]);
+    setLogs(prev => [...prev, `🔍 Targeting: ${carriers.length} USDOT records`]);
+    setLogs(prev => [...prev, `💾 Supabase sync: ENABLED`]);
+    
+    const updatedCarriers = [...carriers];
+    let dbSaved = 0;
 
-  /**
-   * CORE ENGINE: Processes a list of carriers sequentially.
-   * Ensures API fetch and DB save are successful before proceeding.
-   */
-  const startEnrichmentProcess = async (targetList: CarrierData[]) => {
-    if (isProcessing || targetList.length === 0) {
-      addLog("❌ No carriers available to process", "error");
-      return;
-    }
+    // --- STAGE: INSURANCE EXTRACTION ---
+    setCurrentStage('INSURANCE');
+    setLogs(prev => [...prev, `📂 STAGE: Insurance Extraction (SearchCarriers API)`]);
+    
+    let insFound = 0;
+    let insFailed = 0;
 
-    setIsProcessing(true);
-    isRunningRef.current = true;
-    setProgress(0);
-    setStats({ total: targetList.length, insFound: 0, dbSaved: 0, failed: 0 });
-    
-    addLog(`🚀 ENGINE INITIALIZED: Targeting ${targetList.length} records`, 'stage');
-    
-    const updatedCarriers = [...targetList];
-    let localStats = { total: targetList.length, insFound: 0, dbSaved: 0, failed: 0 };
+    for (let i = 0; i < updatedCarriers.length; i++) {
+      if (!isRunningRef.current) break;
+      const dot = updatedCarriers[i].dotNumber;
+      
+      setLogs(prev => [...prev, `⏳ [INSURANCE] [${i+1}/${updatedCarriers.length}] Querying DOT: ${dot}...`]);
+      
+      try {
+        if (!dot || dot === '' || dot === 'UNKNOWN') throw new Error("Invalid DOT");
+        const { policies } = await fetchInsuranceData(dot);
+        updatedCarriers[i] = { ...updatedCarriers[i], insurancePolicies: policies };
+        
+        // Save to Supabase
+        const saveResult = await updateCarrierInsurance(dot, { policies });
+        if (saveResult.success) {
+          dbSaved++;
+        }
+        
+        if (policies.length > 0) {
+          insFound++;
+          setLogs(prev => [...prev, `✨ Success: Extracted ${policies.length} insurance filings for ${dot} → DB synced`]);
+        } else {
+          setLogs(prev => [...prev, `⚠️ Info: No active insurance found for ${dot}`]);
+        }
+      } catch (err) {
+        insFailed++;
+        setLogs(prev => [...prev, `❌ Fail: Insurance timeout for DOT ${dot}`]);
+      }
 
-    for (let i = 0; i < targetList.length; i++) {
-      if (!isRunningRef.current) {
-        addLog("🛑 Sequence interrupted by user.", "error");
-        break;
-      }
+      setProgress(Math.round(((i + 1) / updatedCarriers.length) * 100));
+      setStats(prev => ({ ...prev, total: updatedCarriers.length, insFound, insFailed, dbSaved }));
+      
+      if ((i + 1) % 3 === 0 || (i + 1) === updatedCarriers.length) {
+          onUpdateCarriers([...updatedCarriers]);
+      }
+    }
 
-      const carrier = targetList[i];
-      const dot = carrier.dotNumber;
+    setIsProcessing(false);
+    isRunningRef.current = false;
+    setCurrentStage('IDLE');
+    setLogs(prev => [...prev, `🎉 ENRICHMENT COMPLETE. Database fully synchronized.`]);
+    setLogs(prev => [...prev, `💾 Total Supabase updates: ${dbSaved}`]);
+  };
 
-      try {
-        if (!dot || dot === 'UNKNOWN' || dot === '') throw new Error("Missing USDOT");
+  const handleManualCheck = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualDot) return;
+    setIsManualLoading(true);
+    setManualResult(null);
+    try {
+      const { policies } = await fetchInsuranceData(manualDot);
+      setManualResult({ policies });
+    } catch (error) {
+      console.error("Manual check failed", error);
+    } finally {
+      setIsManualLoading(false);
+    }
+  };
 
-        // 1. Fetch from FMCSA/External API
-        const { policies } = await fetchInsuranceData(dot);
-        
-        // 2. Sync to Supabase (Await response to ensure data persistence)
-        const syncResponse = await updateCarrierInsurance(dot, { policies });
-        
-        if (syncResponse.success) {
-          localStats.dbSaved++;
-          if (policies.length > 0) localStats.insFound++;
-          
-          updatedCarriers[i] = { ...carrier, insurancePolicies: policies };
-          addLog(`✅ [${dot}] Extracted ${policies.length} policies & Synced to DB`, 'success');
-        } else {
-          throw new Error(syncResponse.error || "DB Sync Failed");
-        }
+  const handleExport = () => {
+    const enrichedData = carriers.filter(c => (c.insurancePolicies && c.insurancePolicies.length > 0));
+    if (enrichedData.length === 0) return;
+    
+    const headers = ["DOT", "Legal Name", "Insurance Carrier", "Coverage", "Type"];
+    const rows = enrichedData.flatMap(c => {
+      const baseInfo = [
+        c.dotNumber,
+        `"${c.legalName}"`
+      ];
+      
+      return (c.insurancePolicies || []).map(p => [
+        ...baseInfo,
+        `"${p.carrier}"`,
+        p.coverageAmount,
+        p.type
+      ]);
+    });
 
-      } catch (err: any) {
-        localStats.failed++;
-        addLog(`❌ [${dot || 'ERR'}] ${err.message}`, 'error');
-      }
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `insurance_intel_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
 
-      // Update progress and stats UI
-      const currentPct = Math.round(((i + 1) / targetList.length) * 100);
-      setProgress(currentPct);
-      setStats({ ...localStats });
+  return (
+    <div className="p-8 h-screen flex flex-col overflow-hidden relative selection:bg-indigo-500/20">
+      <div className="flex justify-between items-end mb-8">
+        <div>
+          <h1 className="text-3xl font-extrabold text-white mb-2 tracking-tight">Insurance Intelligence Center</h1>
+          <p className="text-slate-400">Batch Processing: FMCSA Insurance Filings with Supabase Sync</p>
+        </div>
+        <div className="flex gap-4">
+          <button 
+            onClick={() => isProcessing ? (isRunningRef.current = false) : startEnrichmentProcess()}
+            className={`flex items-center gap-3 px-8 py-3 rounded-2xl font-black transition-all shadow-2xl shadow-indigo-500/20 ${
+                isProcessing ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white'
+            }`}
+          >
+            {isProcessing ? <><Loader2 className="animate-spin" size={20} /> Stop Scraper</> : <><Zap size={20} /> Run Insurance Batch</>}
+          </button>
+          <button 
+            disabled={stats.insFound === 0}
+            onClick={handleExport}
+            className="flex items-center gap-3 px-6 py-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white rounded-2xl font-bold transition-all border border-slate-700"
+          >
+            <Download size={20} />
+            Export Intel
+          </button>
+        </div>
+      </div>
 
-      // Partial parent update every 5 items to keep the UI responsive
-      if ((i + 1) % 5 === 0 || i === targetList.length - 1) {
-        onUpdateCarriers([...updatedCarriers]);
-      }
+      <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
+        
+        {/* Sidebar: Manual Check & Stats */}
+        <div className="col-span-12 lg:col-span-4 space-y-6 overflow-y-auto pr-2 custom-scrollbar">
+          
+          {/* Status Badge */}
+          {isProcessing && (
+            <div className="p-4 rounded-2xl border flex items-center gap-3 animate-in slide-in-from-top-4 duration-500 bg-indigo-500/10 border-indigo-500/30 text-indigo-400">
+               <div className="relative">
+                  <div className="absolute inset-0 blur-md opacity-50 bg-indigo-400"></div>
+                  <Loader2 className="animate-spin relative z-10" size={20} />
+               </div>
+               <span className="text-xs font-black uppercase tracking-widest">Currently Scraping: Insurance</span>
+            </div>
+          )}
 
-      // Throttling to prevent Supabase connection exhaustion
-      if (i % 15 === 0) await new Promise(res => setTimeout(res, 250));
-    }
+          <div className="bg-slate-850 border border-slate-700/50 p-6 rounded-3xl shadow-xl">
+             <h3 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-3">
+                <SearchIcon size={16} className="text-indigo-400" />
+                Quick Policy Lookup
+             </h3>
+             <form onSubmit={handleManualCheck} className="space-y-4">
+                <div className="relative">
+                  <input 
+                    type="text" 
+                    value={manualDot}
+                    onChange={(e) => setManualDot(e.target.value)}
+                    placeholder="Enter USDOT Number..."
+                    className="w-full bg-slate-900 border border-slate-700 rounded-2xl pl-4 pr-12 py-3 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                  <button 
+                    type="submit"
+                    disabled={isManualLoading || !manualDot}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-indigo-400 hover:text-white transition-colors"
+                  >
+                    {isManualLoading ? <Loader2 size={20} className="animate-spin" /> : <Play size={20} />}
+                  </button>
+                </div>
+             </form>
 
-    setIsProcessing(false);
-    isRunningRef.current = false;
-    addLog(`🎉 ENRICHMENT COMPLETE: ${localStats.dbSaved} records synced.`, 'stage');
-  };
+             {manualResult && (
+               <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div className="space-y-2">
+                    {manualResult.policies.length === 0 ? (
+                      <div className="p-4 bg-slate-900/50 rounded-2xl text-[10px] text-slate-500 italic text-center">No active insurance filings.</div>
+                    ) : (
+                      manualResult.policies.map((p, idx) => (
+                        <div key={idx} className="p-4 bg-slate-900 border border-slate-800 rounded-2xl">
+                           <div className="flex justify-between items-start mb-1">
+                              <span className="text-[9px] font-black text-indigo-400 uppercase">{p.type} Filing</span>
+                              <span className="text-sm font-black text-white">{p.coverageAmount}</span>
+                           </div>
+                           <p className="text-[10px] font-bold text-slate-400 uppercase truncate">{p.carrier}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+               </div>
+             )}
+          </div>
 
-  const handleRangeScrape = async () => {
-    if (!mcRange.start || !mcRange.end) return;
-    addLog(`📡 Fetching carriers for MC range ${mcRange.start} - ${mcRange.end}...`, 'info');
-    
-    const rangeData = await getCarriersByMCRange(mcRange.start, mcRange.end);
-    if (rangeData.length > 0) {
-      startEnrichmentProcess(rangeData);
-    } else {
-      addLog("⚠️ No records found for the specified MC range.", "error");
-    }
-  };
+          <div className="bg-slate-850 border border-slate-700/50 p-6 rounded-3xl shadow-xl">
+            <h3 className="text-sm font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center gap-3">
+                <Database size={16} className="text-indigo-400" />
+                Live Counters
+            </h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30 col-span-1">
+                <span className="text-[10px] text-slate-500 block mb-1 font-black uppercase">Insurance Found</span>
+                <span className="text-2xl font-black text-indigo-400">{stats.insFound}</span>
+              </div>
+              <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700/30 col-span-1">
+                <span className="text-[10px] text-slate-500 block mb-1 font-black uppercase">DB Updates</span>
+                <span className="text-2xl font-black text-purple-400">{stats.dbSaved}</span>
+              </div>
+            </div>
 
-  const handleManualCheck = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!manualDot) return;
-    setIsManualLoading(true);
-    setManualResult(null);
-    try {
-      const { policies } = await fetchInsuranceData(manualDot);
-      setManualResult({ policies });
-    } catch (error) {
-      addLog(`❌ Manual lookup failed for ${manualDot}`, 'error');
-    } finally {
-      setIsManualLoading(false);
-    }
-  };
+            <div className="mt-6 space-y-4">
+               <div>
+                  <div className="flex justify-between text-[10px] mb-2 font-black text-slate-500 uppercase">
+                    <span>Batch Progress</span>
+                    <span className="text-white">{progress}%</span>
+                  </div>
+                  <div className="w-full bg-slate-900 rounded-full h-2 shadow-inner">
+                    <div className="bg-gradient-to-r from-indigo-500 to-purple-500 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
+                  </div>
+               </div>
+            </div>
+          </div>
+        </div>
 
-  const handleExport = () => {
-    const enriched = carriers.filter(c => c.insurancePolicies?.length);
-    if (enriched.length === 0) return;
-    
-    const escape = (v: any) => `"${String(v).replace(/"/g, '""')}"`;
-    const headers = ["DOT", "Legal Name", "Carrier", "Amount", "Type"];
-    const rows = enriched.flatMap(c => 
-      (c.insurancePolicies || []).map(p => [
-        c.dotNumber, escape(c.legalName), escape(p.carrier), escape(p.coverageAmount), escape(p.type)
-      ].join(','))
-    );
-
-    const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `insurance_sync_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-  };
-
-  return (
-    <div className="p-6 h-screen flex flex-col bg-[#0f172a] text-slate-200 overflow-hidden font-sans">
-      
-      {/* Header */}
-      <div className="flex justify-between items-start mb-6">
-        <div>
-          <h1 className="text-2xl font-black text-white tracking-tighter uppercase flex items-center gap-3">
-            <ShieldCheck className="text-indigo-500" />
-            Insurance Intelligence Center
-          </h1>
-          <p className="text-slate-500 text-xs font-bold tracking-widest uppercase mt-1">
-            Batch FMCSA Enrichment & Supabase Persistence
-          </p>
-        </div>
-        
-        <div className="flex gap-3">
-          {isProcessing && (
-            <button 
-              onClick={() => isRunningRef.current = false}
-              className="px-4 py-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
-            >
-              <StopCircle size={16} /> STOP
-            </button>
-          )}
-          <button 
-            onClick={() => startEnrichmentProcess(carriers)}
-            disabled={isProcessing || carriers.length === 0}
-            className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/20 transition-all flex items-center gap-2"
-          >
-            {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
-            RUN BATCH ({carriers.length})
-          </button>
-          <button 
-            onClick={handleExport}
-            className="p-2 bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-all"
-          >
-            <Download size={18} />
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
-        
-        {/* Sidebar */}
-        <div className="col-span-12 lg:col-span-4 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
-          
-          {/* Progress Card */}
-          <div className="bg-slate-900/50 border border-slate-800 p-5 rounded-2xl shadow-xl">
-            <div className="flex justify-between items-end mb-4">
-              <span className="text-[10px] font-black text-slate-500 uppercase">Sync Progress</span>
-              <span className="text-xl font-black text-indigo-400 font-mono">{progress}%</span>
-            </div>
-            <div className="w-full bg-slate-800 rounded-full h-1.5 mb-6 overflow-hidden">
-               <div className="bg-indigo-500 h-full transition-all duration-500" style={{ width: `${progress}%` }} />
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800 text-center">
-                <p className="text-[9px] text-slate-500 font-bold uppercase">Fetched</p>
-                <p className="text-lg font-black text-indigo-400">{stats.insFound}</p>
-              </div>
-              <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800 text-center">
-                <p className="text-[9px] text-slate-500 font-bold uppercase">Saved</p>
-                <p className="text-lg font-black text-emerald-400">{stats.dbSaved}</p>
-              </div>
-              <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800 text-center">
-                <p className="text-[9px] text-slate-500 font-bold uppercase">Failed</p>
-                <p className="text-lg font-black text-red-400">{stats.failed}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* MC Range Targeting */}
-          <div className="bg-slate-900/50 border border-slate-800 p-5 rounded-2xl shadow-xl">
-            <h3 className="text-xs font-black text-indigo-400 uppercase mb-4 flex items-center gap-2">
-              <Hash size={14} /> MC Range Targeting
-            </h3>
-            <div className="flex items-center gap-3 mb-4">
-              <input 
-                type="text" placeholder="Start MC"
-                value={mcRange.start} onChange={e => setMcRange({...mcRange, start: e.target.value})}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm focus:border-indigo-500 outline-none"
-              />
-              <ArrowRight size={16} className="text-slate-600" />
-              <input 
-                type="text" placeholder="End MC"
-                value={mcRange.end} onChange={e => setMcRange({...mcRange, end: e.target.value})}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm focus:border-indigo-500 outline-none"
-              />
-            </div>
-            <button 
-              onClick={handleRangeScrape}
-              disabled={isProcessing || !mcRange.start || !mcRange.end}
-              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all border border-slate-700"
-            >
-              Fetch & Scrape MC Range
-            </button>
-          </div>
-
-          {/* Manual Lookup */}
-          <div className="bg-slate-900/50 border border-slate-800 p-5 rounded-2xl shadow-xl">
-            <h3 className="text-xs font-black text-slate-400 uppercase mb-4 flex items-center gap-2">
-              <SearchIcon size={14} /> Quick Policy Lookup
-            </h3>
-            <form onSubmit={handleManualCheck} className="relative">
-              <input 
-                type="text" placeholder="Enter USDOT#"
-                value={manualDot} onChange={e => setManualDot(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-4 pr-10 py-2 text-sm outline-none"
-              />
-              <button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2 text-indigo-500 hover:text-white transition-colors">
-                {isManualLoading ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-              </button>
-            </form>
-            {manualResult && (
-              <div className="mt-4 space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
-                {manualResult.policies.map((p, i) => (
-                  <div key={i} className="p-3 bg-slate-950/50 border border-slate-800 rounded-xl">
-                    <div className="flex justify-between items-start mb-1">
-                      <span className="text-[9px] font-black text-indigo-400 uppercase">{p.type}</span>
-                      <span className="text-xs font-bold text-white">{p.coverageAmount}</span>
-                    </div>
-                    <p className="text-[10px] text-slate-500 truncate">{p.carrier}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Log Area */}
-        <div className="col-span-12 lg:col-span-8 flex flex-col bg-slate-950 rounded-3xl border border-slate-800 overflow-hidden relative shadow-2xl">
-          <div className="bg-slate-900/40 p-4 border-b border-slate-800 flex justify-between items-center px-6">
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-              <ClipboardList size={14} /> Intelligence Pipeline
-            </span>
-            <div className="flex gap-2">
-               <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-               <span className="text-[9px] font-mono text-slate-600 uppercase">Live Stream</span>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-6 font-mono text-[11px] space-y-1 custom-scrollbar">
-            {logs.length === 0 && (
-              <div className="h-full flex flex-col items-center justify-center opacity-20">
-                <Database size={40} className="mb-2" />
-                <p className="uppercase tracking-widest text-xs">Waiting for sequence...</p>
-              </div>
-            )}
-            {logs.map((log, i) => (
-              <div key={i} className={`flex gap-3 py-1 px-2 rounded-lg transition-all ${
-                log.type === 'error' ? 'text-red-400 bg-red-400/5' : 
-                log.type === 'success' ? 'text-emerald-400 bg-emerald-400/5' :
-                log.type === 'stage' ? 'text-indigo-300 bg-indigo-500/10 font-bold border-l-2 border-indigo-500' : 
-                'text-slate-500'
-              }`}>
-                <span className="opacity-30 shrink-0">[{new Date().toLocaleTimeString([], {hour12: false})}]</span>
-                <span className="break-all">{log.msg}</span>
-              </div>
-            ))}
-            <div ref={logsEndRef} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+        {/* Main Log Area */}
+        <div className="col-span-12 lg:col-span-8 flex flex-col bg-slate-950 rounded-[2rem] border border-slate-800/50 overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+          <div className="bg-slate-900/80 p-4 border-b border-slate-800 flex justify-between items-center px-8">
+            <div className="flex items-center gap-3">
+                <ClipboardList size={18} className="text-slate-500" />
+                <span className="text-[11px] font-black text-slate-400 uppercase tracking-widest">Insurance Pipeline Stream</span>
+            </div>
+            <div className="text-[10px] text-slate-500 font-mono italic">INS_ENGINE // ACTIVE</div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-8 font-mono text-xs space-y-2 custom-scrollbar">
+            {logs.length === 0 && <span className="text-slate-700 italic opacity-50 block text-center py-20">Idle. Insurance enrichment will start automatically after live scraping.</span>}
+            {logs.map((log, i) => (
+              <div key={i} className={`flex gap-4 p-2 rounded-lg transition-colors ${log.includes('❌') ? 'bg-red-500/5 text-red-400' : log.includes('✅') || log.includes('✨') || log.includes('🎉') ? 'bg-emerald-500/5 text-emerald-400' : log.includes('📂') ? 'bg-indigo-500/10 text-indigo-300 font-black' : 'hover:bg-slate-900 text-slate-400'}`}>
+                <span className="opacity-30 shrink-0 font-bold">[{new Date().toLocaleTimeString().split(' ')[0]}]</span>
+                <span className="leading-relaxed">{log}</span>
+              </div>
+            ))}
+            <div ref={logsEndRef} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
