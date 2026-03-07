@@ -443,3 +443,33 @@ export const updateCarrierSafety = async (dotNumber: string, safetyData: any): P
     return { success: false, error: err.message };
   }
 };
+
+
+//snakecase
+
+/**
+ * Fetches carriers within a specific MC Number range
+ */
+export const getCarriersByMCRange = async (start: string, end: string): Promise<any[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('carriers')
+      .select('*')
+      .gte('mc_number', start)
+      .lte('mc_number', end)
+      .order('mc_number', { ascending: true });
+
+    if (error) throw error;
+
+    // Map snake_case from DB to camelCase for the App
+    return (data || []).map(record => ({
+      mcNumber: record.mc_number,
+      dotNumber: record.dot_number,
+      legalName: record.legal_name,
+      insurancePolicies: record.insurance_policies || []
+    }));
+  } catch (err) {
+    console.error('❌ Error fetching MC range:', err);
+    return [];
+  }
+};
