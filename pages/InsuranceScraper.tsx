@@ -1,275 +1,350 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { ClipboardList, Loader2, Zap, ShieldCheck, Database, RotateCcw, Search, X, AlertCircle, Hourglass } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  ShieldCheck, Database, Search, ClipboardList, 
+  Loader2, Zap, X, AlertCircle, Hourglass, 
+  CheckCircle2, Globe, Activity 
+} from 'lucide-react';
 import { CarrierData, InsurancePolicy } from '../types';
 import { fetchInsuranceData } from '../services/mockService';
 import { supabase } from '../services/supabaseClient';
 
 // Configuration
-const CONCURRENCY = 5; 
-const BATCH_SIZE = 1000; 
-const COOLDOWN_MS = 60000; // 60 seconds
+const BATCH_SIZE = 1000;
+const COOLDOWN_MS = 60000;
 
 interface InsuranceScraperProps {
   carriers: CarrierData[];
   onUpdateCarriers: (newData: CarrierData[]) => void;
+  autoStart?: boolean;
 }
 
-// ── Policy Card Component ──
+// ── Glass Policy Card ──
 const PolicyCard: React.FC<{ policy: InsurancePolicy; dot: string }> = ({ policy, dot }) => {
   const typeColors: Record<string, string> = {
-    'BI&PD': 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-    'CARGO': 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-    'BOND': 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+    'BI&PD': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    'CARGO': 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+    'BOND': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
   };
-
   return (
-    <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 space-y-3 hover:border-indigo-500/50 transition-colors">
+    <div className="p-4 bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl space-y-3 hover:border-indigo-500/50 transition-all duration-300">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-white font-bold text-sm truncate">{policy.carrier}</p>
-          <p className="text-slate-500 text-xs font-mono mt-0.5">{policy.policyNumber}</p>
+          <p className="text-white font-bold text-sm truncate uppercase tracking-tight">{policy.carrier}</p>
+          <p className="text-slate-500 text-[10px] font-mono mt-0.5">ID: {policy.policyNumber}</p>
         </div>
-        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black border ${typeColors[policy.type] || 'bg-slate-700 text-slate-400 border-slate-600'}`}>
+        <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black border uppercase ${typeColors[policy.type] || 'bg-slate-800 text-slate-400'}`}>
           {policy.type}
         </span>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-slate-800/60 rounded-xl p-3">
-          <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Coverage</p>
-          <p className="text-white font-bold text-sm">{policy.coverageAmount}</p>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="bg-black/20 rounded-xl p-2.5 border border-white/5">
+          <p className="text-[9px] text-slate-500 uppercase font-black mb-1">Limit</p>
+          <p className="text-indigo-300 font-bold">{policy.coverageAmount}</p>
         </div>
-        <div className="bg-slate-800/60 rounded-xl p-3">
-          <p className="text-[10px] text-slate-500 uppercase font-black mb-1">Effective</p>
-          <p className="text-white font-bold text-sm">{policy.effectiveDate}</p>
+        <div className="bg-black/20 rounded-xl p-2.5 border border-white/5">
+          <p className="text-[9px] text-slate-500 uppercase font-black mb-1">Expiry</p>
+          <p className="text-white font-bold">{policy.effectiveDate}</p>
         </div>
       </div>
     </div>
   );
 };
 
-export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, onUpdateCarriers }) => {
+export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, onUpdateCarriers, autoStart }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
+  const [logs, setLogs] = useState<{msg: string, type: 'info' | 'success' | 'error' | 'warn'}[]>([]);
   const [progress, setProgress] = useState(0);
-  const [stats, setStats] = useState({ processed: 0, insFound: 0, insEmpty: 0, dbSaved: 0 });
+  const [stats, setStats] = useState({ total: 0, insFound: 0, insFailed: 0, dbSaved: 0 });
 
+  // MC Range State
   const [mcRangeMode, setMcRangeMode] = useState(false);
   const [mcRangeStart, setMcRangeStart] = useState('');
   const [mcRangeEnd, setMcRangeEnd] = useState('');
   const [mcRangeCarriers, setMcRangeCarriers] = useState<CarrierData[]>([]);
 
+  // Manual Search State
+  const [manualDot, setManualDot] = useState('');
+  const [isManualLoading, setIsManualLoading] = useState(false);
+  const [manualResult, setManualResult] = useState<{ dot: string; policies: InsurancePolicy[] } | null>(null);
+
   const logsEndRef = useRef<HTMLDivElement>(null);
   const isRunningRef = useRef(false);
-  const pendingSavesRef = useRef<{ dot_number: string; insurance_policies: any[]; date_scraped: string }[]>([]);
 
   useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
-  const log = (msg: string) => setLogs(prev => [...prev, msg]);
+  const log = (msg: string, type: 'info' | 'success' | 'error' | 'warn' = 'info') => {
+    setLogs(prev => [...prev, { msg, type }]);
+  };
 
-  // ── Database Sync Logic ──
-  const flushSaves = async () => {
-    if (pendingSavesRef.current.length === 0) return;
-    
-    const batchData = [...pendingSavesRef.current];
-    pendingSavesRef.current = []; // Clear immediately to prevent double-save
-    
-    log(`💾 Syncing batch of ${batchData.length} to Supabase...`);
-    
+  // ── Database Schema Aligned Sync ──
+  const syncToDB = async (dot: string, policies: InsurancePolicy[]) => {
     try {
-      // Using .upsert with onConflict handles updates and inserts automatically
       const { error } = await supabase
         .from('carriers')
-        .upsert(batchData, { onConflict: 'dot_number' });
-
+        .update({ 
+          insurance_policies: policies, // Aligned to JSONB column
+          date_scraped: new Date().toISOString() 
+        })
+        .eq('dot_number', dot.toString().trim()); // Aligned to TEXT column
+      
       if (error) throw error;
-
-      setStats(s => ({ ...s, dbSaved: s.dbSaved + batchData.length }));
-      log(`✅ DB Sync Successful: ${batchData.length} records updated.`);
-    } catch (err: any) {
-      log(`❌ DB Sync Error: ${err.message}`);
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
     }
   };
 
-  // ── Load MC Range ──
+  // ── Restore Manual Search ──
+  const handleManualLookup = async () => {
+    const dot = manualDot.trim();
+    if (!dot) return;
+    setIsManualLoading(true);
+    setManualResult(null);
+    try {
+      log(`🔎 Manual Lookup: Requesting DOT #${dot}...`, 'info');
+      const { policies } = await fetchInsuranceData(dot);
+      
+      if (policies.length > 0) {
+        setManualResult({ dot, policies });
+        const db = await syncToDB(dot, policies);
+        if (db.success) log(`✅ Manual Save: DOT #${dot} updated in database.`, 'success');
+      } else {
+        log(`⬜ Manual Lookup: No insurance found for DOT #${dot}.`, 'warn');
+      }
+    } catch (e: any) {
+      log(`❌ Manual Lookup Error: ${e.message}`, 'error');
+    } finally { setIsManualLoading(false); }
+  };
+
+  // ── MC Range Logic ──
   const handleMcRangeSearch = async () => {
     if (!mcRangeStart || !mcRangeEnd) return;
-    log(`🔍 Loading MC Range ${mcRangeStart} - ${mcRangeEnd}...`);
+    log(`📡 Querying DB for MC Range ${mcRangeStart} - ${mcRangeEnd}...`, 'info');
     try {
       const { data, error } = await supabase
         .from('carriers')
-        .select('mc_number, dot_number, legal_name')
-        .gte('mc_number', parseInt(mcRangeStart))
-        .lte('mc_number', parseInt(mcRangeEnd));
+        .select('*')
+        .gte('mc_number', mcRangeStart)
+        .lte('mc_number', mcRangeEnd)
+        .order('mc_number', { ascending: true });
 
       if (error) throw error;
-      setMcRangeCarriers(data.map(row => ({
-        mcNumber: row.mc_number,
-        dotNumber: row.dot_number,
-        legalName: row.legal_name,
-        insurancePolicies: []
-      })));
-      log(`✅ Loaded ${data.length} carriers.`);
-    } catch (err: any) { log(`❌ Error: ${err.message}`); }
+      setMcRangeCarriers(data || []);
+      log(`✅ Range Loaded: ${data?.length || 0} carriers ready.`, 'success');
+    } catch (err: any) { log(`❌ DB Fetch Error: ${err.message}`, 'error'); }
   };
 
-  // ── Scraper Engine ──
-  const startScraping = async () => {
+  // ── Main Pipeline ──
+  const startScrape = async () => {
     if (isProcessing) return;
     const target = mcRangeMode ? mcRangeCarriers : carriers;
-    if (target.length === 0) return log('⚠️ No carriers to process.');
+    if (target.length === 0) return log('⚠️ Pipeline Empty: Load carriers first.', 'warn');
 
     setIsProcessing(true);
     isRunningRef.current = true;
-    setStats({ processed: 0, insFound: 0, insEmpty: 0, dbSaved: 0 });
-    log(`🚀 Starting Scrape. Batching every ${BATCH_SIZE} USDOTs...`);
+    setStats({ total: target.length, insFound: 0, insFailed: 0, dbSaved: 0 });
+    log(`🚀 Engine Started. Concurrency: Sequential | Batching: ${BATCH_SIZE}`, 'info');
 
     const updated = [...target];
-    let completed = 0;
+    let foundCount = 0;
+    let failCount = 0;
+    let savedCount = 0;
+    let batchCounter = 0;
 
-    const worker = async (index: number) => {
-      if (!isRunningRef.current) return;
-      const carrier = updated[index];
-      if (!carrier.dotNumber) { completed++; return; }
+    for (let i = 0; i < updated.length; i++) {
+      if (!isRunningRef.current) break;
+      const c = updated[i];
+      const dot = c.dotNumber?.toString().trim();
 
       try {
-        const result = await fetchInsuranceData(carrier.dotNumber);
-        const hasIns = result.policies.length > 0;
-
-        // Push to pending buffer
-        pendingSavesRef.current.push({
-          dot_number: carrier.dotNumber,
-          insurance_policies: result.policies,
-          date_scraped: new Date().toISOString()
-        });
-
-        setStats(s => ({
-          ...s,
-          processed: s.processed + 1,
-          insFound: s.insFound + (hasIns ? 1 : 0),
-          insEmpty: s.insEmpty + (hasIns ? 0 : 1),
-        }));
-
-        // Batch trigger
-        if (pendingSavesRef.current.length >= BATCH_SIZE) {
-          await flushSaves();
-          log(`🕒 Pause active: 60s cooldown...`);
-          setIsPaused(true);
-          await new Promise(r => setTimeout(r, COOLDOWN_MS));
-          setIsPaused(false);
-          log(`▶️ Resuming...`);
+        if (!dot) throw new Error('Invalid DOT');
+        const { policies } = await fetchInsuranceData(dot);
+        
+        const db = await syncToDB(dot, policies);
+        if (db.success) savedCount++;
+        if (policies.length > 0) {
+            foundCount++;
+            log(`✓ [${i+1}] DOT ${dot}: Found ${policies.length} policies.`, 'success');
+        } else {
+            log(`- [${i+1}] DOT ${dot}: No data.`, 'info');
         }
-      } catch (e: any) { log(`❌ Error DOT ${carrier.dotNumber}: ${e.message}`); }
-      
-      completed++;
-      setProgress(Math.round((completed / target.length) * 100));
-    };
+      } catch (e: any) {
+        failCount++;
+        log(`! [${i+1}] DOT ${dot}: ${e.message}`, 'error');
+      }
 
-    // Concurrency Pool
-    const active = [];
-    for (let i = 0; i < target.length; i++) {
-      if (!isRunningRef.current) break;
-      const p = worker(i);
-      active.push(p);
-      if (active.length >= CONCURRENCY) await Promise.race(active);
+      // Update State
+      setStats(s => ({ ...s, insFound: foundCount, insFailed: failCount, dbSaved: savedCount }));
+      setProgress(Math.round(((i + 1) / target.length) * 100));
+
+      // Batch Check
+      batchCounter++;
+      if (batchCounter >= BATCH_SIZE && (i + 1) < target.length) {
+        setIsPaused(true);
+        log(`⏳ BATCH LIMIT: Cooling down for 60s to prevent API lock...`, 'warn');
+        await new Promise(r => setTimeout(r, COOLDOWN_MS));
+        setIsPaused(false);
+        batchCounter = 0;
+      }
     }
 
-    await Promise.all(active);
-    await flushSaves(); // Final leftovers
     setIsProcessing(false);
     isRunningRef.current = false;
-    log(`🎉 Scrape process completed.`);
-  };
-
-  const handleStop = async () => {
-    isRunningRef.current = false;
-    log('🛑 Stopping... Syncing data before exit.');
-    await flushSaves();
-    setIsProcessing(false);
+    log(`🏁 Pipeline Finished. Total Records Updated: ${savedCount}`, 'success');
   };
 
   return (
-    <div className="p-8 h-screen flex flex-col overflow-hidden bg-slate-950 text-slate-100 font-sans">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-black tracking-tighter text-white uppercase flex items-center gap-2">
-            <ShieldCheck className="text-indigo-500" /> Insurance Scraper
-          </h1>
-          <p className="text-slate-500 font-medium ml-8 italic">Batch Save: {BATCH_SIZE} | Pause: 60s</p>
+    <div className="h-screen bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black text-slate-200 p-6 flex flex-col overflow-hidden font-sans">
+      
+      {/* Header Area */}
+      <div className="flex justify-between items-center mb-8 px-2">
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-indigo-600/20 border border-indigo-500/40 rounded-2xl shadow-lg shadow-indigo-500/10">
+            <ShieldCheck className="text-indigo-400" size={28} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-black text-white tracking-tight uppercase flex items-center gap-2">
+              Insurance Scraper <span className="text-[10px] bg-indigo-600 px-2 py-0.5 rounded text-white tracking-widest">v2.0</span>
+            </h1>
+            <div className="flex items-center gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">
+              <span className="flex items-center gap-1"><Activity size={10} className="text-green-500" /> API: Active</span>
+              <span className="flex items-center gap-1"><Database size={10} className="text-indigo-500" /> DB Sync: Aligned</span>
+            </div>
+          </div>
         </div>
+
         <button
-          onClick={isProcessing ? handleStop : startScraping}
-          className={`px-8 py-4 rounded-2xl font-black flex items-center gap-3 transition-all ${
-            isProcessing ? 'bg-red-500/10 text-red-500 border border-red-500/50' : 'bg-indigo-600 text-white'
+          onClick={() => isProcessing ? (isRunningRef.current = false) : startScrape()}
+          className={`group flex items-center gap-3 px-8 py-4 rounded-2xl font-black transition-all duration-500 transform active:scale-95 ${
+            isProcessing 
+            ? 'bg-red-500/10 text-red-500 border border-red-500/30' 
+            : 'bg-indigo-600 text-white shadow-2xl shadow-indigo-500/30 hover:bg-indigo-500'
           }`}
         >
-          {isProcessing ? <><Loader2 className="animate-spin" size={20} /> Stop</> : <><Zap size={20} /> Start</>}
+          {isProcessing ? <><Loader2 className="animate-spin" /> STOP ENGINE</> : <><Zap className="group-hover:animate-pulse" /> IGNITE SCRAPER</>}
         </button>
       </div>
 
-      <div className="grid grid-cols-12 gap-6 flex-1 min-h-0 overflow-hidden">
-        {/* Sidebar */}
-        <div className="col-span-12 lg:col-span-4 space-y-4 overflow-y-auto">
-          {isPaused && (
-            <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl flex items-center gap-3 text-amber-400 animate-pulse">
-              <Hourglass size={18} />
-              <span className="text-xs font-black uppercase">Cooldown Active - 60s Remaining</span>
-            </div>
-          )}
-
-          <div className="bg-slate-900/50 border border-slate-800 p-5 rounded-2xl">
-            <div className="flex items-center justify-between mb-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-              <span>MC Range Loader</span>
-              <button onClick={() => setMcRangeMode(!mcRangeMode)} className={`px-2 py-1 rounded ${mcRangeMode ? 'bg-indigo-600 text-white' : 'bg-slate-800'}`}>
-                {mcRangeMode ? 'ON' : 'OFF'}
+      <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
+        
+        {/* Left Control Panel */}
+        <div className="col-span-12 lg:col-span-4 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+          
+          {/* Manual Search (Restored) */}
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl">
+            <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <Search size={12} /> Manual Carrier Lookup
+            </h3>
+            <div className="flex gap-2">
+              <input
+                value={manualDot}
+                onChange={e => setManualDot(e.target.value)}
+                placeholder="Enter USDOT#"
+                className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-indigo-500 outline-none transition-all"
+              />
+              <button 
+                onClick={handleManualLookup}
+                disabled={isManualLoading}
+                className="px-5 bg-white/10 hover:bg-white/20 rounded-xl transition-all"
+              >
+                {isManualLoading ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} />}
               </button>
             </div>
-            {mcRangeMode && (
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <input value={mcRangeStart} onChange={e => setMcRangeStart(e.target.value)} placeholder="Start MC" className="w-1/2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm" />
-                  <input value={mcRangeEnd} onChange={e => setMcRangeEnd(e.target.value)} placeholder="End MC" className="w-1/2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm" />
+            {manualResult && (
+              <div className="mt-4 animate-in fade-in slide-in-from-top-2">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[10px] font-black text-green-400 uppercase">Results for #{manualResult.dot}</span>
+                  <button onClick={() => setManualResult(null)}><X size={12}/></button>
                 </div>
-                <button onClick={handleMcRangeSearch} className="w-full bg-slate-800 hover:bg-slate-700 py-2 rounded-xl text-xs font-black uppercase">Load Carriers</button>
+                <div className="space-y-2">
+                  {manualResult.policies.map((p, i) => <PolicyCard key={i} policy={p} dot={manualResult.dot} />)}
+                </div>
               </div>
             )}
           </div>
 
-          <div className="bg-slate-900/50 border border-slate-800 p-5 rounded-2xl space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                <span className="text-[10px] text-slate-500 font-black block mb-1">Found Insurance</span>
-                <span className="text-2xl font-black text-green-400">{stats.insFound}</span>
+          {/* Range Selection */}
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                <Globe size={12} /> DB Range Selector
+              </h3>
+              <button 
+                onClick={() => setMcRangeMode(!mcRangeMode)}
+                className={`text-[9px] font-black px-2 py-1 rounded-md transition-all ${mcRangeMode ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-500'}`}
+              >
+                {mcRangeMode ? 'ON' : 'OFF'}
+              </button>
+            </div>
+            <div className={`space-y-3 transition-all ${mcRangeMode ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+              <div className="flex gap-2">
+                <input value={mcRangeStart} onChange={e => setMcRangeStart(e.target.value)} placeholder="Start MC" className="w-1/2 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm" />
+                <input value={mcRangeEnd} onChange={e => setMcRangeEnd(e.target.value)} placeholder="End MC" className="w-1/2 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm" />
               </div>
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                <span className="text-[10px] text-slate-500 font-black block mb-1">Queue (Not Saved)</span>
-                <span className="text-2xl font-black text-indigo-400">{pendingSavesRef.current.length}</span>
+              <button onClick={handleMcRangeSearch} className="w-full bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 py-2.5 rounded-xl text-[10px] font-black uppercase hover:bg-indigo-600/20">
+                Load Carriers Into Buffer
+              </button>
+            </div>
+          </div>
+
+          {/* Real-time Stats */}
+          <div className="bg-indigo-600/5 border border-indigo-500/20 p-6 rounded-[2.5rem] space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-[10px] font-black text-indigo-400 uppercase mb-1">Found Insurance</p>
+                <p className="text-4xl font-black text-white leading-none">{stats.insFound}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-green-400 uppercase mb-1">DB Records Saved</p>
+                <p className="text-4xl font-black text-white leading-none">{stats.dbSaved}</p>
               </div>
             </div>
-            <div className="bg-indigo-500/10 p-4 rounded-2xl border border-indigo-500/20 flex justify-between">
-              <div>
-                <p className="text-[10px] text-indigo-400 font-black uppercase">DB Records Updated</p>
-                <p className="text-3xl font-black">{stats.dbSaved}</p>
+            
+            <div className="space-y-2">
+              <div className="flex justify-between text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                <span>Task Completion</span>
+                <span className="text-indigo-400">{progress}%</span>
               </div>
-              <div className="text-right">
-                <p className="text-[10px] text-slate-500 font-black uppercase">Progress</p>
-                <p className="text-3xl font-black text-slate-400">{progress}%</p>
+              <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+                <div 
+                  className="h-full bg-gradient-to-r from-indigo-600 to-blue-400 transition-all duration-700 ease-out" 
+                  style={{ width: `${progress}%` }}
+                />
               </div>
             </div>
           </div>
         </div>
 
-        {/* Console */}
-        <div className="col-span-12 lg:col-span-8 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col overflow-hidden">
-          <div className="bg-slate-900/80 p-4 border-b border-slate-800 text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-            <ClipboardList size={14} /> Pipeline Console
+        {/* Console Panel */}
+        <div className="col-span-12 lg:col-span-8 bg-black/40 backdrop-blur-2xl rounded-[2.5rem] border border-white/10 overflow-hidden flex flex-col shadow-inner">
+          <div className="bg-white/5 p-5 border-b border-white/10 flex justify-between items-center px-8">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">System Traffic Log</span>
+            </div>
+            {isPaused && (
+              <div className="flex items-center gap-2 text-amber-500 text-[10px] font-black bg-amber-500/10 px-3 py-1 rounded-full animate-bounce">
+                <Hourglass size={12} /> COOLDOWN ACTIVE
+              </div>
+            )}
           </div>
-          <div className="flex-1 overflow-y-auto p-6 font-mono text-[11px] space-y-1">
+          
+          <div className="flex-1 overflow-y-auto p-8 font-mono text-[11px] leading-relaxed custom-scrollbar">
+            {logs.length === 0 && (
+              <div className="h-full flex flex-col items-center justify-center opacity-20 space-y-4">
+                <ClipboardList size={48} />
+                <p className="font-black uppercase tracking-[0.3em]">Console Idle</p>
+              </div>
+            )}
             {logs.map((log, i) => (
-              <div key={i} className={`flex gap-3 ${log.includes('✅') ? 'text-green-400' : log.includes('❌') ? 'text-red-400' : 'text-slate-400'}`}>
-                <span className="opacity-20">{new Date().toLocaleTimeString()}</span>
-                <span>{log}</span>
+              <div key={i} className={`flex gap-4 mb-1 group ${
+                log.type === 'success' ? 'text-green-400' : 
+                log.type === 'error' ? 'text-red-400' : 
+                log.type === 'warn' ? 'text-amber-400' : 'text-slate-500'
+              }`}>
+                <span className="opacity-20 shrink-0 font-bold tracking-tighter">{new Date().toLocaleTimeString([], {hour12: false})}</span>
+                <span className="group-hover:text-white transition-colors">{log.msg}</span>
               </div>
             ))}
             <div ref={logsEndRef} />
