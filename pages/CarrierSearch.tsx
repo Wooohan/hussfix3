@@ -635,7 +635,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
 
                 {/* 1. Operation Information Block */}
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col gap-6 shadow-2xl">
@@ -773,7 +773,52 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   )}
                 </div>
 
-                {/* 3. Real-time Insurance Snapshot */}
+                {/* 3. Inspection History */}
+                <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col shadow-2xl">
+                  <div className="flex items-center gap-3 mb-8">
+                    <Activity size={20} className="text-orange-400" />
+                    <h4 className="text-xl font-black text-white uppercase tracking-tight">Inspection History</h4>
+                  </div>
+                  <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
+                    {selectedCarrier.inspections && selectedCarrier.inspections.length > 0 ? (
+                      selectedCarrier.inspections.slice(0, 5).map((insp: any, i: number) => (
+                        <div key={i} className="bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 shadow-sm group/inspection hover:border-orange-500/30 transition-all">
+                          <div className="flex justify-between items-start mb-3">
+                            <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest border border-orange-500/10 px-2 py-0.5 rounded-lg">Report #{insp.reportNumber}</span>
+                            <span className="text-xs font-bold text-slate-400">{insp.date}</span>
+                          </div>
+                          <p className="text-sm font-bold text-slate-200 mb-3 truncate leading-tight">{insp.location}</p>
+                          <div className="grid grid-cols-2 gap-2 text-[10px]">
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700">
+                              <span className="text-slate-500 block">OOS</span>
+                              <span className="text-orange-400 font-bold">{insp.oosViolations}</span>
+                            </div>
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700">
+                              <span className="text-slate-500 block">Driver</span>
+                              <span className="text-orange-400 font-bold">{insp.driverViolations}</span>
+                            </div>
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700">
+                              <span className="text-slate-500 block">Vehicle</span>
+                              <span className="text-orange-400 font-bold">{insp.vehicleViolations}</span>
+                            </div>
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700">
+                              <span className="text-slate-500 block">Hazmat</span>
+                              <span className="text-orange-400 font-bold">{insp.hazmatViolations}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-20 text-slate-700 text-center">
+                        <Activity size={48} className="opacity-10 mb-4" />
+                        <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2">No Inspections Found</p>
+                        <p className="text-[10px] text-slate-600 max-w-[180px] leading-relaxed italic">Inspection history will appear here once available.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 4. Real-time Insurance Snapshot */}
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col shadow-2xl">
                   <div className="flex items-center gap-3 mb-8">
                     <ShieldCheck size={20} className="text-emerald-400" />
