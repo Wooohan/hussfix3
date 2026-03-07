@@ -145,9 +145,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
   const [nameSearchTerm, setNameSearchTerm] = useState('');
   const [selectedDot, setSelectedDot] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
-  const [inspectionTab, setInspectionTab] = useState<'inspections' | 'crashes'>('inspections');
-  const [inspectionPage, setInspectionPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(5);
 
   const [filters, setFilters] = useState({
     active: '',
@@ -236,8 +233,8 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
     setFilters({
       active: '', state: [], dot: '', yearsInBusinessMin: '', yearsInBusinessMax: '',
       hasEmail: '', hasBoc3: '', hasCompanyRep: '',
-      classification: [], carrierOperation: [], hazmat: ''
-      , powerUnitsMin: '', powerUnitsMax: '', driversMin: '', driversMax: '', cargo: [],
+      classification: [], carrierOperation: [], hazmat: '',
+      powerUnitsMin: '', powerUnitsMax: '', driversMin: '', driversMax: '', cargo: [],
       insuranceRequired: [], bipdMin: '', bipdMax: '', bipdOnFile: '', cargoOnFile: '', bondOnFile: '',
       oosMin: '', oosMax: '', crashesMin: '', crashesMax: '',
       injuriesMin: '', injuriesMax: '', fatalitiesMin: '', fatalitiesMax: '',
@@ -259,38 +256,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
     { value: '1', label: 'Yes' },
     { value: '0', label: 'No' },
   ];
-
-  // Calculate inspection summary stats
-  const getInspectionStats = () => {
-    if (!selectedCarrier?.inspections) return { total: 0, violations: 0, oos: 0, crashes: 0 };
-    
-    const inspections = selectedCarrier.inspections;
-    let violations = 0;
-    let oos = 0;
-    
-    inspections.forEach((insp: any) => {
-      violations += (insp.driverViolations || 0) + (insp.vehicleViolations || 0) + (insp.hazmatViolations || 0);
-      oos += insp.oosViolations || 0;
-    });
-    
-    return {
-      total: inspections.length,
-      violations,
-      oos,
-      crashes: selectedCarrier.crashes || 0
-    };
-  };
-
-  const inspectionStats = getInspectionStats();
-  
-  // Paginate inspections
-  const paginatedInspections = selectedCarrier?.inspections 
-    ? selectedCarrier.inspections.slice((inspectionPage - 1) * itemsPerPage, inspectionPage * itemsPerPage)
-    : [];
-  
-  const totalInspectionPages = selectedCarrier?.inspections 
-    ? Math.ceil(selectedCarrier.inspections.length / itemsPerPage)
-    : 0;
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col overflow-hidden relative selection:bg-indigo-500/30">
@@ -491,62 +456,53 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
               Reset All
             </button>
             <button onClick={applyFilters} disabled={isLoading}
-              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-500/20">
-              Apply Filters
+              className="px-8 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2">
+              {isLoading ? <><Loader2 size={14} className="animate-spin" /> Searching...</> : 'Apply Filters'}
             </button>
           </div>
         </div>
       )}
 
-      <div className="flex-1 overflow-hidden flex flex-col bg-slate-900/20 border border-slate-800/50 rounded-3xl">
-        <div className="flex-1 overflow-y-auto custom-scrollbar">
-          <table className="w-full">
-            <thead className="sticky top-0 bg-slate-950/80 border-b border-slate-800 z-10">
+      {isLoading && (
+        <div className="flex items-center justify-center gap-3 py-4 text-indigo-400 text-sm font-bold">
+          <Loader2 size={20} className="animate-spin" />
+          Fetching records from database...
+        </div>
+      )}
+
+      <div className="flex-1 bg-slate-900/40 border border-slate-700/50 rounded-3xl overflow-hidden flex flex-col shadow-inner min-h-0">
+        <div className="overflow-auto custom-scrollbar flex-1">
+          <table className="w-full text-left text-sm text-slate-300">
+            <thead className="bg-slate-900/90 backdrop-blur sticky top-0 z-10 border-b border-slate-800">
               <tr>
-                <th className="px-6 py-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">Carrier Name</th>
-                <th className="px-6 py-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">MC#</th>
-                <th className="px-6 py-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">DOT#</th>
-                <th className="px-6 py-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">State</th>
-                <th className="px-6 py-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">Status</th>
-                <th className="px-6 py-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">Action</th>
+                <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">MC Number</th>
+                <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">Legal Name</th>
+                <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">DOT Number</th>
+                <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">Status</th>
+                <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500 text-right">View</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
-              {carriers.length === 0 ? (
+              {!isLoading && carriers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-16 text-center">
-                    <div className="flex flex-col items-center justify-center space-y-4">
-                      <div className="p-4 bg-slate-800/30 rounded-full"><Search size={32} className="opacity-20 text-slate-600" /></div>
-                      <p className="text-sm font-bold text-slate-500">No carriers found. Try adjusting your search filters.</p>
-                    </div>
-                  </td>
+                  <td colSpan={5} className="p-16 text-center text-slate-600 italic">No results found matching your search criteria.</td>
                 </tr>
               ) : (
                 carriers.map((carrier, idx) => (
-                  <tr key={idx} className="hover:bg-slate-800/30 transition-colors border-slate-800/30">
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-bold text-white">{carrier.legalName}</span>
-                        <span className="text-xs text-slate-500">{carrier.physicalAddress}</span>
-                      </div>
+                  <tr key={idx} className="hover:bg-indigo-500/5 transition-colors group cursor-pointer" onClick={() => setSelectedDot(carrier.dotNumber)}>
+                    <td className="p-4 font-mono text-indigo-400 font-bold">{carrier.mcNumber}</td>
+                    <td className="p-4">
+                      <div className="font-bold text-white group-hover:text-indigo-200 transition-colors truncate max-w-[250px]">{carrier.legalName}</div>
                     </td>
-                    <td className="px-6 py-4">
-                      <span className="font-mono text-sm font-bold text-indigo-400">{carrier.mcNumber}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="font-mono text-sm font-bold text-white">{carrier.dotNumber}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-sm font-bold text-slate-300">{carrier.physicalAddress?.split(',').pop()?.trim() || 'N/A'}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${carrier.status?.includes('NOT AUTHORIZED') ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-green-500/10 text-green-400 border-green-500/30'}`}>
-                        {carrier.status?.includes('NOT AUTHORIZED') ? 'Unauthorized' : 'Active'}
+                    <td className="p-4 font-mono text-slate-400">{carrier.dotNumber}</td>
+                    <td className="p-4">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-black tracking-tight border ${carrier.status?.includes('AUTHORIZED') && !carrier.status?.includes('NOT') ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                        {carrier.status?.includes('AUTHORIZED') && !carrier.status?.includes('NOT') ? 'ACTIVE' : 'INACTIVE'}
                       </span>
                     </td>
                     <td className="p-4 text-right">
                       <button
-                        onClick={(e) => { e.stopPropagation(); setSelectedDot(carrier.dotNumber); setInspectionPage(1); }}
+                        onClick={(e) => { e.stopPropagation(); setSelectedDot(carrier.dotNumber); }}
                         className="p-2 bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white rounded-xl transition-all shadow-lg active:scale-95"
                       >
                         <Eye size={18} />
@@ -707,21 +663,21 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
                     {selectedCarrier.insurancePolicies && selectedCarrier.insurancePolicies.length > 0 ? (
                       selectedCarrier.insurancePolicies.map((p: any, i: number) => (
-                        <div key={i} className="bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 shadow-sm group/policy hover:border-emerald-500/30 transition-all">
+                        <div key={i} className="bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 shadow-sm group/policy hover:border-indigo-500/30 transition-all">
                           <div className="flex justify-between items-start mb-4">
-                            <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest border border-emerald-500/10 px-2 py-0.5 rounded-lg">{p.type}</span>
-                            <span className="text-xs font-bold text-slate-400">{p.expirationDate}</span>
+                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest border border-indigo-500/10 px-2 py-0.5 rounded-lg">{p.type} FILING</span>
+                            <span className="text-xl font-black text-white">{p.coverageAmount}</span>
                           </div>
-                          <p className="text-sm font-bold text-slate-200 mb-2">{p.policyNumber}</p>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-black text-slate-500 uppercase">Coverage:</span>
-                            <span className="text-xs font-bold text-emerald-300">${p.coverage?.toLocaleString() || 'N/A'}</span>
+                          <p className="text-sm font-black text-slate-200 mb-4 truncate leading-tight group-hover/policy:text-indigo-300 transition-colors uppercase">{p.carrier}</p>
+                          <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono pt-4 border-t border-slate-800/50">
+                            <span className="bg-slate-850 px-2 py-1 rounded">#{p.policyNumber}</span>
+                            <span className="bg-slate-850 px-2 py-1 rounded">EFF: {p.effectiveDate}</span>
                           </div>
                         </div>
                       ))
                     ) : (
                       <div className="flex flex-col items-center justify-center py-20 text-slate-700 text-center">
-                        <ShieldCheck size={48} className="opacity-10 mb-4" />
+                        <Info size={48} className="opacity-10 mb-4" />
                         <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2">No Filings Extracted</p>
                         <p className="text-[10px] text-slate-600 max-w-[180px] leading-relaxed italic">Intelligence enrichment required for insurance verification.</p>
                       </div>
@@ -797,137 +753,35 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   )}
                 </div>
 
-                {/* REDESIGNED INSPECTION HISTORY SECTION */}
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col shadow-2xl">
-                  <div className="flex items-center gap-3 mb-6">
+                  <div className="flex items-center gap-3 mb-8">
                     <Activity size={20} className="text-orange-400" />
-                    <h4 className="text-xl font-black text-white uppercase tracking-tight">Inspections & Crashes</h4>
+                    <h4 className="text-xl font-black text-white uppercase tracking-tight">Inspection History</h4>
                   </div>
-
-                  {/* Summary Statistics */}
-                  <div className="grid grid-cols-4 gap-3 mb-6">
-                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-center">
-                      <p className="text-[9px] text-slate-500 font-black uppercase mb-1">Total</p>
-                      <p className="text-2xl font-black text-white">{inspectionStats.total}</p>
-                    </div>
-                    <div className="bg-red-500/10 p-4 rounded-xl border border-red-500/20 text-center">
-                      <p className="text-[9px] text-red-400 font-black uppercase mb-1">Violations</p>
-                      <p className="text-2xl font-black text-red-400">{inspectionStats.violations}</p>
-                    </div>
-                    <div className="bg-orange-500/10 p-4 rounded-xl border border-orange-500/20 text-center">
-                      <p className="text-[9px] text-orange-400 font-black uppercase mb-1">OOS</p>
-                      <p className="text-2xl font-black text-orange-400">{inspectionStats.oos}</p>
-                    </div>
-                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 text-center">
-                      <p className="text-[9px] text-slate-500 font-black uppercase mb-1">Crashes</p>
-                      <p className="text-2xl font-black text-white">{inspectionStats.crashes}</p>
-                    </div>
-                  </div>
-
-                  {/* Tab Navigation */}
-                  <div className="flex gap-2 mb-6 border-b border-slate-800 pb-4">
-                    <button
-                      onClick={() => { setInspectionTab('inspections'); setInspectionPage(1); }}
-                      className={`px-4 py-2 text-sm font-black uppercase tracking-widest transition-all ${
-                        inspectionTab === 'inspections'
-                          ? 'text-indigo-400 border-b-2 border-indigo-400 pb-3'
-                          : 'text-slate-500 hover:text-slate-300'
-                      }`}
-                    >
-                      Inspections
-                    </button>
-                    <button
-                      onClick={() => { setInspectionTab('crashes'); setInspectionPage(1); }}
-                      className={`px-4 py-2 text-sm font-black uppercase tracking-widest transition-all ${
-                        inspectionTab === 'crashes'
-                          ? 'text-indigo-400 border-b-2 border-indigo-400 pb-3'
-                          : 'text-slate-500 hover:text-slate-300'
-                      }`}
-                    >
-                      Crashes
-                    </button>
-                  </div>
-
-                  {/* Inspection List */}
-                  <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 mb-4">
-                    {inspectionTab === 'inspections' ? (
-                      selectedCarrier.inspections && selectedCarrier.inspections.length > 0 ? (
-                        paginatedInspections.map((insp: any, i: number) => (
-                          <div key={i} className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 hover:border-indigo-500/30 transition-all group cursor-pointer">
-                            <div className="flex justify-between items-start mb-2">
-                              <span className="text-sm font-black text-white">{insp.date}</span>
-                              <span className="text-[9px] font-bold text-slate-400">{insp.reportNumber ? `Report #${insp.reportNumber}` : 'N/A'}</span>
-                            </div>
-                            <p className="text-xs text-slate-300 mb-3">{insp.location || 'Location N/A'}</p>
-                            <div className="flex flex-wrap gap-2">
-                              {insp.driverViolations > 0 && (
-                                <span className="bg-red-500/20 text-red-400 px-2 py-1 rounded text-[10px] font-bold border border-red-500/30">
-                                  {insp.driverViolations} Violations
-                                </span>
-                              )}
-                              {insp.oosViolations > 0 && (
-                                <span className="bg-orange-500/20 text-orange-400 px-2 py-1 rounded text-[10px] font-bold border border-orange-500/30">
-                                  OOS
-                                </span>
-                              )}
-                              {insp.driverViolations === 0 && insp.oosViolations === 0 && (
-                                <span className="bg-green-500/20 text-green-400 px-2 py-1 rounded text-[10px] font-bold border border-green-500/30">
-                                  Clean
-                                </span>
-                              )}
-                            </div>
+                  <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
+                    {selectedCarrier.inspections && selectedCarrier.inspections.length > 0 ? (
+                      selectedCarrier.inspections.slice(0, 5).map((insp: any, i: number) => (
+                        <div key={i} className="bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 shadow-sm group/inspection hover:border-orange-500/30 transition-all">
+                          <div className="flex justify-between items-start mb-3">
+                            <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest border border-orange-500/10 px-2 py-0.5 rounded-lg">Report #{insp.reportNumber}</span>
+                            <span className="text-xs font-bold text-slate-400">{insp.date}</span>
                           </div>
-                        ))
-                      ) : (
-                        <div className="flex flex-col items-center justify-center py-12 text-slate-700 text-center">
-                          <Activity size={32} className="opacity-10 mb-3" />
-                          <p className="text-xs font-black uppercase tracking-widest text-slate-500">No Inspections Found</p>
+                          <p className="text-sm font-bold text-slate-200 mb-3 truncate leading-tight">{insp.location}</p>
+                          <div className="grid grid-cols-2 gap-2 text-[10px]">
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">OOS</span><span className="text-orange-400 font-bold">{insp.oosViolations}</span></div>
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">Driver</span><span className="text-orange-400 font-bold">{insp.driverViolations}</span></div>
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">Vehicle</span><span className="text-orange-400 font-bold">{insp.vehicleViolations}</span></div>
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">Hazmat</span><span className="text-orange-400 font-bold">{insp.hazmatViolations}</span></div>
+                          </div>
                         </div>
-                      )
+                      ))
                     ) : (
-                      <div className="flex flex-col items-center justify-center py-12 text-slate-700 text-center">
-                        <AlertTriangle size={32} className="opacity-10 mb-3" />
-                        <p className="text-xs font-black uppercase tracking-widest text-slate-500">Crash data not available</p>
+                      <div className="flex flex-col items-center justify-center py-20 text-slate-700 text-center">
+                        <Activity size={48} className="opacity-10 mb-4" />
+                        <p className="text-xs font-black uppercase tracking-widest text-slate-500">No Inspections Found</p>
                       </div>
                     )}
                   </div>
-
-                  {/* Pagination */}
-                  {inspectionTab === 'inspections' && selectedCarrier.inspections && selectedCarrier.inspections.length > 0 && (
-                    <div className="flex items-center justify-between pt-4 border-t border-slate-800">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-slate-500 font-bold">Items per page:</span>
-                        <select
-                          value={itemsPerPage}
-                          onChange={(e) => { setItemsPerPage(parseInt(e.target.value)); setInspectionPage(1); }}
-                          className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-[10px] text-white"
-                        >
-                          <option value={5}>5</option>
-                          <option value={10}>10</option>
-                          <option value={20}>20</option>
-                        </select>
-                      </div>
-                      <span className="text-[10px] text-slate-500 font-bold">
-                        {inspectionPage} of {totalInspectionPages} ({selectedCarrier.inspections.length} total)
-                      </span>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setInspectionPage(p => Math.max(1, p - 1))}
-                          disabled={inspectionPage === 1}
-                          className="p-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded transition-all"
-                        >
-                          <ChevronUp size={14} />
-                        </button>
-                        <button
-                          onClick={() => setInspectionPage(p => Math.min(totalInspectionPages, p + 1))}
-                          disabled={inspectionPage === totalInspectionPages}
-                          className="p-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded transition-all"
-                        >
-                          <ChevronDown size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
 
