@@ -167,35 +167,33 @@ export const saveCarriersToSupabase = async (
 // UPDATE OPERATIONS (Enrichment)
 // ============================================================
 
-/**
- * Update Insurance Policies for a carrier using USDOT
- */
-export const updateCarrierInsurance = async (
-  dotNumber: string, 
-  insuranceData: any
-): Promise<{ success: boolean; error?: string }> => {
+export const updateCarrierInsurance = async (dotNumber: string, data: { policies: InsurancePolicy[] }) => {
   try {
-    const { data, error } = await supabase
-      .from('carriers')
-      .update({
-        insurance_policies: insuranceData.policies,
-        updated_at: new Date().toISOString(),
-        date_scraped: new Date().toLocaleDateString()
-      })
-      .eq('dot_number', String(dotNumber))
-      .select();
+    // 1. Log exactly what we are sending
+    console.log(`📤 Attempting DB Update for DOT: ${dotNumber}`, data.policies);
 
-    if (error) throw error;
-    
-    if (!data || data.length === 0) {
-      return { success: false, error: `No record found with DOT ${dotNumber}` };
+    const { data: result, error } = await supabase
+      .from('carriers') // Ensure this matches your table name exactly
+      .update({ 
+        insurancePolicies: data.policies,
+        last_sync: new Date().toISOString() 
+      })
+      .eq('dotNumber', dotNumber)
+      .select(); // Requesting data back helps confirm the write worked
+
+    if (error) {
+      console.error("❌ Supabase Error Details:", error);
+      return { success: false, error };
     }
 
-    console.log('✅ Insurance data updated for DOT:', dotNumber);
-    return { success: true };
+    return { success: true, data: result };
   } catch (err: any) {
-    console.error('❌ Supabase update error:', err);
-    return { success: false, error: err.message || "Unknown error" };
+    // This catches the 'Failed to fetch' TypeError
+    console.error("🚨 Critical Network Error during DB Update:", err);
+    return { 
+      success: false, 
+      error: { message: err.message, stack: 'Possible CORS or Network Timeout' } 
+    };
   }
 };
 
