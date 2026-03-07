@@ -11,7 +11,6 @@ interface CarrierSearchProps {
   onNavigateToInsurance: () => void;
 }
 
-// US States list for the State multi-select
 const US_STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
   'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
@@ -45,7 +44,6 @@ const CARGO_TYPES = [
 
 const INSURANCE_REQUIRED_TYPES = ['BI&PD','CARGO','BOND'];
 
-// Helper to calculate years in business from MCS-150 date
 const calculateYearsInBusiness = (mcs150Date: string | undefined): number | null => {
   if (!mcs150Date || mcs150Date === 'N/A') return null;
   try {
@@ -59,7 +57,6 @@ const calculateYearsInBusiness = (mcs150Date: string | undefined): number | null
   }
 };
 
-// Simple multi-select dropdown component
 const MultiSelect: React.FC<{
   options: string[];
   selected: string[];
@@ -101,7 +98,6 @@ const MultiSelect: React.FC<{
   );
 };
 
-// Collapsible filter group
 const FilterGroup: React.FC<{ title: string; icon: React.ReactNode; children: React.ReactNode }> = ({ title, icon, children }) => {
   const [open, setOpen] = useState(true);
   return (
@@ -150,7 +146,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
   const [selectedDot, setSelectedDot] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
 
-  // Filter states
   const [filters, setFilters] = useState({
     active: '',
     state: [] as string[],
@@ -193,7 +188,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
     if (nameSearchTerm.trim()) f.legalName = nameSearchTerm.trim();
     if (filters.dot.trim()) f.dotNumber = filters.dot.trim();
     if (filters.active) f.active = filters.active;
-    if (filters.state.length > 0) f.state = filters.state.join('|');
+    if (filters.state.length > 0) f.state = filters.state.join('|'); 
     if (filters.hasEmail) f.hasEmail = filters.hasEmail;
     if (filters.hasBoc3) f.hasBoc3 = filters.hasBoc3;
     if (filters.hasCompanyRep) f.hasCompanyRep = filters.hasCompanyRep;
@@ -264,7 +259,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col overflow-hidden relative selection:bg-indigo-500/30">
-      {/* Header Section */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-white mb-1 tracking-tight">Carrier Database</h1>
@@ -290,7 +284,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
         </div>
       </div>
 
-      {/* Search Bar Row */}
       <div className="flex gap-3 mb-4">
         <div className="relative group w-52 shrink-0">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 group-focus-within:text-indigo-400 transition-colors">
@@ -341,7 +334,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
         </button>
       </div>
 
-      {/* Advanced Filter Panel */}
       {showFilters && (
         <div className="mb-4 p-4 bg-slate-950/80 border border-slate-700/50 rounded-3xl overflow-y-auto max-h-[55vh] custom-scrollbar">
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -524,12 +516,10 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
         </div>
       </div>
 
-      {/* Detailed Modal Popup */}
       {selectedCarrier && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm animate-in fade-in duration-300">
           <div className="bg-slate-900 border-2 border-slate-700/50 w-full max-w-7xl max-h-[95vh] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col relative animate-in zoom-in slide-in-from-bottom-4 duration-300">
 
-            {/* Modal Header */}
             <div className="p-6 md:p-8 border-b border-slate-800 bg-slate-850/30 flex justify-between items-center">
               <div className="flex gap-4 md:gap-8 items-center">
                 <div className="w-14 h-14 md:w-16 md:h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-500/10">
@@ -545,20 +535,15 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   <p className="text-sm md:text-base text-slate-400 font-medium italic opacity-60">{selectedCarrier.dbaName || 'No Registered DBA'}</p>
                 </div>
               </div>
-              <button
-                onClick={() => setSelectedDot(null)}
-                className="p-3 text-slate-500 hover:text-white hover:bg-slate-800 rounded-2xl transition-all active:scale-75"
-              >
+              <button onClick={() => setSelectedDot(null)} className="p-3 text-slate-500 hover:text-white hover:bg-slate-800 rounded-2xl transition-all active:scale-75">
                 <X size={28} />
               </button>
             </div>
 
-            {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar bg-slate-900/40">
 
-              {/* FIRST TOP COMES: Identification Contact Info Compliance (3 Grid) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-                {/* Identification Card */}
+              {/* FIRST TOP: Identification | Contact Info | Compliance (3 Cols) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 <div className="bg-slate-850/60 p-6 rounded-3xl border border-slate-700/50 space-y-4 shadow-lg group">
                   <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-1 group-hover:text-indigo-400 transition-colors">
                     <Hash size={14} className="text-indigo-400" /> Identification
@@ -570,7 +555,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   </div>
                 </div>
 
-                {/* Contact Card */}
                 <div className="bg-slate-850/60 p-6 rounded-3xl border border-slate-700/50 space-y-4 shadow-lg group">
                   <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-1 group-hover:text-indigo-400 transition-colors">
                     <Phone size={14} className="text-indigo-400" /> Contact Info
@@ -594,7 +578,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   </div>
                 </div>
 
-                {/* Compliance Card */}
                 <div className="bg-slate-850/60 p-6 rounded-3xl border border-slate-700/50 space-y-4 shadow-lg group">
                   <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-1 group-hover:text-indigo-400 transition-colors">
                     <Calendar size={14} className="text-indigo-400" /> Compliance
@@ -619,10 +602,8 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                 </div>
               </div>
 
-              {/* SECOND & THIRD ROWS: Operation Info, L&I Filings, Inspection, Safety (Converted to 3 Grid) */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-                {/* 1. Operation Information Block */}
+              {/* SECOND ROW: Operation Information | Verified L&I Filings (2 Cols) */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col gap-6 shadow-2xl">
                   <div className="flex items-center gap-3">
                     <Truck size={20} className="text-indigo-400" />
@@ -674,7 +655,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   </div>
                 </div>
 
-                {/* 2. Verified L&I Filings Block */}
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col shadow-2xl">
                   <div className="flex items-center gap-3 mb-8">
                     <ShieldCheck size={20} className="text-emerald-400" />
@@ -704,64 +684,17 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                     )}
                   </div>
                 </div>
+              </div>
 
-                {/* 3. Inspection History Block */}
-                <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col shadow-2xl">
-                  <div className="flex items-center gap-3 mb-8">
-                    <Activity size={20} className="text-orange-400" />
-                    <h4 className="text-xl font-black text-white uppercase tracking-tight">Inspection History</h4>
-                  </div>
-                  <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
-                    {selectedCarrier.inspections && selectedCarrier.inspections.length > 0 ? (
-                      selectedCarrier.inspections.slice(0, 5).map((insp: any, i: number) => (
-                        <div key={i} className="bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 shadow-sm group/inspection hover:border-orange-500/30 transition-all">
-                          <div className="flex justify-between items-start mb-3">
-                            <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest border border-orange-500/10 px-2 py-0.5 rounded-lg">Report #{insp.reportNumber}</span>
-                            <span className="text-xs font-bold text-slate-400">{insp.date}</span>
-                          </div>
-                          <p className="text-sm font-bold text-slate-200 mb-3 truncate leading-tight">{insp.location}</p>
-                          <div className="grid grid-cols-2 gap-2 text-[10px]">
-                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700">
-                              <span className="text-slate-500 block">OOS</span>
-                              <span className="text-orange-400 font-bold">{insp.oosViolations}</span>
-                            </div>
-                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700">
-                              <span className="text-slate-500 block">Driver</span>
-                              <span className="text-orange-400 font-bold">{insp.driverViolations}</span>
-                            </div>
-                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700">
-                              <span className="text-slate-500 block">Vehicle</span>
-                              <span className="text-orange-400 font-bold">{insp.vehicleViolations}</span>
-                            </div>
-                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700">
-                              <span className="text-slate-500 block">Hazmat</span>
-                              <span className="text-orange-400 font-bold">{insp.hazmatViolations}</span>
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="flex flex-col items-center justify-center py-20 text-slate-700 text-center">
-                        <Activity size={48} className="opacity-10 mb-4" />
-                        <p className="text-xs font-black uppercase tracking-widest text-slate-500 mb-2">No Inspections Found</p>
-                        <p className="text-[10px] text-slate-600 max-w-[180px] leading-relaxed italic">Inspection history will appear here once available.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* 4. Safety Information Block (Wraps to 3rd Row) */}
+              {/* THIRD ROW: Safety Information | Inspection History (2 Cols, 50/50) */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col gap-6 shadow-2xl relative">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <ShieldCheck size={20} className="text-indigo-400" />
                       <h4 className="text-xl font-black text-white uppercase tracking-tight">Safety Information</h4>
                     </div>
-                    <a
-                      href={`https://ai.fmcsa.dot.gov/SMS/Carrier/${selectedCarrier.dotNumber}/CompleteProfile.aspx`}
-                      target="_blank"
-                      className="text-[10px] font-bold text-indigo-400 flex items-center gap-1 hover:text-white transition-colors"
-                    >
+                    <a href={`https://ai.fmcsa.dot.gov/SMS/Carrier/${selectedCarrier.dotNumber}/CompleteProfile.aspx`} target="_blank" className="text-[10px] font-bold text-indigo-400 flex items-center gap-1 hover:text-white transition-colors">
                       <ExternalLink size={12} /> View FMCSA Source
                     </a>
                   </div>
@@ -813,36 +746,49 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                     </div>
                   ) : (
                     <div className="flex-1 flex flex-col items-center justify-center py-20 text-slate-700 text-center space-y-4">
-                      <div className="p-6 bg-slate-800/30 rounded-full">
-                        <ShieldAlert size={48} className="opacity-20 text-indigo-500" />
-                      </div>
-                      <div className="space-y-2">
-                        <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Record Not Enriched</p>
-                        <p className="text-[10px] text-slate-600 max-w-[200px] mx-auto leading-relaxed">
-                          Run the <strong>Intelligence Enrichment</strong> batch process to hydrate safety data for this USDOT.
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => { setSelectedDot(null); onNavigateToInsurance(); }}
-                        className="text-[10px] font-black text-indigo-400 hover:text-white uppercase tracking-tighter transition-colors bg-indigo-500/5 px-4 py-2 rounded-lg border border-indigo-500/10"
-                      >
-                        Launch Pipeline now
-                      </button>
+                      <div className="p-6 bg-slate-800/30 rounded-full"><ShieldAlert size={48} className="opacity-20 text-indigo-500" /></div>
+                      <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Record Not Enriched</p>
+                      <button onClick={() => { setSelectedDot(null); onNavigateToInsurance(); }} className="text-[10px] font-black text-indigo-400 hover:text-white uppercase transition-colors bg-indigo-500/5 px-4 py-2 rounded-lg border border-indigo-500/10">Launch Pipeline now</button>
                     </div>
                   )}
                 </div>
 
+                <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col shadow-2xl">
+                  <div className="flex items-center gap-3 mb-8">
+                    <Activity size={20} className="text-orange-400" />
+                    <h4 className="text-xl font-black text-white uppercase tracking-tight">Inspection History</h4>
+                  </div>
+                  <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
+                    {selectedCarrier.inspections && selectedCarrier.inspections.length > 0 ? (
+                      selectedCarrier.inspections.slice(0, 5).map((insp: any, i: number) => (
+                        <div key={i} className="bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 shadow-sm group/inspection hover:border-orange-500/30 transition-all">
+                          <div className="flex justify-between items-start mb-3">
+                            <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest border border-orange-500/10 px-2 py-0.5 rounded-lg">Report #{insp.reportNumber}</span>
+                            <span className="text-xs font-bold text-slate-400">{insp.date}</span>
+                          </div>
+                          <p className="text-sm font-bold text-slate-200 mb-3 truncate leading-tight">{insp.location}</p>
+                          <div className="grid grid-cols-2 gap-2 text-[10px]">
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">OOS</span><span className="text-orange-400 font-bold">{insp.oosViolations}</span></div>
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">Driver</span><span className="text-orange-400 font-bold">{insp.driverViolations}</span></div>
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">Vehicle</span><span className="text-orange-400 font-bold">{insp.vehicleViolations}</span></div>
+                            <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">Hazmat</span><span className="text-orange-400 font-bold">{insp.hazmatViolations}</span></div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-20 text-slate-700 text-center">
+                        <Activity size={48} className="opacity-10 mb-4" />
+                        <p className="text-xs font-black uppercase tracking-widest text-slate-500">No Inspections Found</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
+
             </div>
 
-            {/* Modal Footer */}
             <div className="p-6 md:p-8 bg-slate-950/70 border-t border-slate-800 flex justify-end gap-4">
-              <button
-                onClick={() => setSelectedDot(null)}
-                className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold transition-all border border-slate-700 active:scale-95"
-              >
-                Close View
-              </button>
+              <button onClick={() => setSelectedDot(null)} className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold border border-slate-700 active:scale-95 transition-all">Close View</button>
               <button className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-black shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-2 active:scale-95 transition-all group">
                 <Download size={18} className="group-hover:-translate-y-0.5 transition-transform" /> Download Intel Report
               </button>
