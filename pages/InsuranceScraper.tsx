@@ -93,7 +93,12 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
         insFailed++;
         setLogs(prev => [...prev, `❌ Fail: Insurance timeout for DOT ${dot}`]);
       }
-
+// --- THE DELAY ---
+      // Adding 2 seconds after every request to prevent CORS/Rate-limit blocking
+      if (i < updatedCarriers.length - 1) {
+        setLogs(prev => [...prev, `⏱️ Waiting 2s to prevent rate limit...`]);
+        await sleep(2000);
+        
       setProgress(Math.round(((i + 1) / updatedCarriers.length) * 100));
       setStats(prev => ({ ...prev, total: updatedCarriers.length, insFound, insFailed, dbSaved }));
       
