@@ -19,6 +19,23 @@ export interface OosRate {
   nationalAvg: string;
 }
 
+export interface InspectionViolation {
+  label: string;
+  description: string;
+  weight: string;
+}
+
+export interface Inspection {
+  reportNumber: string;
+  location: string;
+  date: string;
+  oosViolations: number;
+  driverViolations: number;
+  vehicleViolations: number;
+  hazmatViolations: number;
+  violationList: InspectionViolation[];
+}
+
 export interface CarrierData {
   mcNumber: string;
   dotNumber: string;
@@ -49,6 +66,8 @@ export interface CarrierData {
   safetyRatingDate?: string;
   basicScores?: BasicScore[];
   oosRates?: OosRate[];
+  // Inspections
+  inspections?: Inspection[];
 }
 
 export interface ScraperConfig {
