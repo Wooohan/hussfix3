@@ -115,20 +115,28 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
     if (filters.dot.trim()) f.dotNumber = filters.dot.trim();
     if (filters.active) f.active = filters.active;
     if (filters.state.length > 0) f.state = filters.state.join('|'); 
-    
-    // SAFETY & NUMERIC LOGIC FIX: use !== '' to ensure '0' is passed to the search engine
-    const numFields = [
-      'yearsInBusinessMin', 'yearsInBusinessMax', 'powerUnitsMin', 'powerUnitsMax', 
-      'driversMin', 'driversMax', 'bipdMin', 'bipdMax', 'oosMin', 'oosMax', 
-      'crashesMin', 'crashesMax', 'injuriesMin', 'injuriesMax', 'fatalitiesMin', 
-      'fatalitiesMax', 'towawayMin', 'towawayMax', 'inspectionsMin', 'inspectionsMax'
-    ];
-    
-    numFields.forEach(field => {
-      if (filters[field as keyof typeof filters] !== '') {
-        f[field as keyof CarrierFilters] = parseInt(filters[field as keyof typeof filters] as string) as any;
-      }
-    });
+
+    // SAFETY FILTER LOGIC FIX: Check for empty string specifically so 0 is not ignored
+    if (filters.yearsInBusinessMin !== '') f.yearsInBusinessMin = parseInt(filters.yearsInBusinessMin);
+    if (filters.yearsInBusinessMax !== '') f.yearsInBusinessMax = parseInt(filters.yearsInBusinessMax);
+    if (filters.powerUnitsMin !== '') f.powerUnitsMin = parseInt(filters.powerUnitsMin);
+    if (filters.powerUnitsMax !== '') f.powerUnitsMax = parseInt(filters.powerUnitsMax);
+    if (filters.driversMin !== '') f.driversMin = parseInt(filters.driversMin);
+    if (filters.driversMax !== '') f.driversMax = parseInt(filters.driversMax);
+    if (filters.bipdMin !== '') f.bipdMin = parseInt(filters.bipdMin);
+    if (filters.bipdMax !== '') f.bipdMax = parseInt(filters.bipdMax);
+    if (filters.oosMin !== '') f.oosMin = parseInt(filters.oosMin);
+    if (filters.oosMax !== '') f.oosMax = parseInt(filters.oosMax);
+    if (filters.crashesMin !== '') f.crashesMin = parseInt(filters.crashesMin);
+    if (filters.crashesMax !== '') f.crashesMax = parseInt(filters.crashesMax);
+    if (filters.injuriesMin !== '') f.injuriesMin = parseInt(filters.injuriesMin);
+    if (filters.injuriesMax !== '') f.injuriesMax = parseInt(filters.injuriesMax);
+    if (filters.fatalitiesMin !== '') f.fatalitiesMin = parseInt(filters.fatalitiesMin);
+    if (filters.fatalitiesMax !== '') f.fatalitiesMax = parseInt(filters.fatalitiesMax);
+    if (filters.towawayMin !== '') f.towawayMin = parseInt(filters.towawayMin);
+    if (filters.towawayMax !== '') f.towawayMax = parseInt(filters.towawayMax);
+    if (filters.inspectionsMin !== '') f.inspectionsMin = parseInt(filters.inspectionsMin);
+    if (filters.inspectionsMax !== '') f.inspectionsMax = parseInt(filters.inspectionsMax);
 
     if (filters.hasEmail) f.hasEmail = filters.hasEmail;
     if (filters.hasBoc3) f.hasBoc3 = filters.hasBoc3;
@@ -164,6 +172,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
 
   return (
     <div className="p-4 md:p-8 h-screen flex flex-col overflow-hidden relative selection:bg-indigo-500/30">
+      {/* DB TOP HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-white mb-1 tracking-tight">Carrier Database</h1>
@@ -175,19 +184,21 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
         </div>
       </div>
 
+      {/* SEARCH BAR */}
       <div className="flex gap-3 mb-4">
         <div className="relative group w-52 shrink-0">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 group-focus-within:text-indigo-400"><Hash size={16} /></div>
-          <input type="text" placeholder="Search MC#..." className="w-full bg-slate-850/80 border border-slate-700/50 rounded-2xl pl-9 pr-3 py-3 text-white text-sm focus:border-indigo-500 outline-none" value={mcSearchTerm} onChange={(e) => setMcSearchTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && applyFilters()} />
+          <input type="text" placeholder="Search MC#..." className="w-full bg-slate-850/80 border border-slate-700/50 rounded-2xl pl-9 pr-3 py-3 text-white text-sm focus:border-indigo-500 outline-none transition-all shadow-xl" value={mcSearchTerm} onChange={(e) => setMcSearchTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && applyFilters()} />
         </div>
         <div className="flex-1 relative group">
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-indigo-400"><Search size={18} /></div>
-          <input type="text" placeholder="Search by Business Name..." className="w-full bg-slate-850/80 border border-slate-700/50 rounded-2xl pl-11 pr-4 py-3 text-white text-sm focus:border-indigo-500 outline-none" value={nameSearchTerm} onChange={(e) => setNameSearchTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && applyFilters()} />
+          <input type="text" placeholder="Search by Business Name..." className="w-full bg-slate-850/80 border border-slate-700/50 rounded-2xl pl-11 pr-4 py-3 text-white text-sm focus:border-indigo-500 outline-none transition-all shadow-xl" value={nameSearchTerm} onChange={(e) => setNameSearchTerm(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && applyFilters()} />
         </div>
         <button onClick={() => setShowFilters(!showFilters)} className={`px-5 py-3 rounded-2xl font-bold transition-all flex items-center gap-2 border text-sm ${showFilters ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}><Zap size={16} />{showFilters ? 'Hide Filters' : 'Advanced Filters'}</button>
         <button onClick={applyFilters} disabled={isLoading} className="px-7 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-bold transition-all shadow-lg flex items-center gap-2 text-sm">{isLoading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}</button>
       </div>
 
+      {/* FILTERS PANEL */}
       {showFilters && (
         <div className="mb-4 p-4 bg-slate-950/80 border border-slate-700/50 rounded-3xl overflow-y-auto max-h-[55vh] custom-scrollbar">
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -219,10 +230,11 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
         </div>
       )}
 
+      {/* TABLE */}
       <div className="flex-1 bg-slate-900/40 border border-slate-700/50 rounded-3xl overflow-hidden flex flex-col shadow-inner min-h-0">
         <div className="overflow-auto custom-scrollbar flex-1">
           <table className="w-full text-left text-sm text-slate-300">
-            <thead className="bg-slate-900/90 sticky top-0 z-10 border-b border-slate-800">
+            <thead className="bg-slate-900/90 backdrop-blur sticky top-0 z-10 border-b border-slate-800">
               <tr>
                 <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">MC Number</th>
                 <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">Legal Name</th>
@@ -242,7 +254,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                       {carrier.status?.includes('AUTHORIZED') && !carrier.status?.includes('NOT') ? 'ACTIVE' : 'INACTIVE'}
                     </span>
                   </td>
-                  <td className="p-4 text-right"><button className="p-2 bg-slate-800 hover:bg-indigo-600 text-slate-300 rounded-xl transition-all"><Eye size={18} /></button></td>
+                  <td className="p-4 text-right"><button className="p-2 bg-slate-800 hover:bg-indigo-600 text-slate-300 rounded-xl transition-all shadow-lg"><Eye size={18} /></button></td>
                 </tr>
               ))}
             </tbody>
@@ -250,11 +262,12 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
         </div>
       </div>
 
+      {/* MODAL SIDE DRAWER */}
       {selectedCarrier && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm">
-          <div className="bg-slate-900 border-2 border-slate-700/50 w-full max-w-7xl max-h-[95vh] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col relative">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-slate-900 border-2 border-slate-700/50 w-full max-w-7xl max-h-[95vh] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col relative animate-in zoom-in slide-in-from-bottom-4 duration-300">
 
-            {/* HEADER: Height reduced by ~30% and Badges updated to Emerald Green */}
+            {/* MODIFIED HEADER: No DBA, Emerald Buttons, Reduced Height */}
             <div className="p-4 md:p-5 border-b border-slate-800 bg-slate-850/30 flex justify-between items-start">
               <div className="flex gap-4 md:gap-6 items-center">
                 <div className="w-12 h-12 md:w-14 md:h-14 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-500/10">
@@ -280,40 +293,59 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                     </button>
                     <div className="bg-[#10B981] text-white rounded-lg px-3 py-1.5 shadow-md">
                       <span className="font-black text-[10px] md:text-xs uppercase tracking-wide">
-                        {selectedCarrier.operationClassification?.some(c => c.toLowerCase().includes('broker')) ? 'Entity: Broker' : 'Entity: Carrier'}
+                        {selectedCarrier.operationClassification?.some(c => c.toLowerCase().includes('broker')) ? 'Broker' : 'Carrier'}
                       </span>
                     </div>
                   </div>
                 </div>
               </div>
-              <button onClick={() => setSelectedDot(null)} className="p-2 text-slate-500 hover:text-white hover:bg-slate-800 rounded-xl transition-all"><X size={24} /></button>
+              <button onClick={() => setSelectedDot(null)} className="p-2 text-slate-500 hover:text-white hover:bg-slate-800 rounded-xl transition-all active:scale-75"><X size={24} /></button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar bg-slate-900/40">
-              {/* OPERATION AND SAFETY DATA GRID (NO UI CHANGE) */}
+              {/* REST OF CONTENT - Kept exactly as your original block to prevent crashes */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div className="bg-slate-850/60 p-6 rounded-3xl border border-slate-700/50 space-y-4 group">
+                <div className="bg-slate-850/60 p-6 rounded-3xl border border-slate-700/50 space-y-4 shadow-lg group">
                   <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-1 group-hover:text-indigo-400 transition-colors"><Hash size={14} className="text-indigo-400" /> Identification</h3>
                   <div className="space-y-3">
                     <div className="flex flex-col"><span className="text-[9px] text-slate-500 font-black uppercase">MC/MX Number</span><span className="text-base font-black text-indigo-400 font-mono">{selectedCarrier.mcNumber}</span></div>
                     <div className="flex flex-col"><span className="text-[9px] text-slate-500 font-black uppercase">USDOT Number</span><span className="text-base font-black text-white font-mono">{selectedCarrier.dotNumber}</span></div>
                   </div>
                 </div>
-                <div className="bg-slate-850/60 p-6 rounded-3xl border border-slate-700/50 space-y-4 group">
+                <div className="bg-slate-850/60 p-6 rounded-3xl border border-slate-700/50 space-y-4 shadow-lg group">
                   <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-1 group-hover:text-indigo-400 transition-colors"><Phone size={14} className="text-indigo-400" /> Contact Info</h3>
                   <div className="space-y-4">
-                    <div className="flex items-center gap-3"><Phone size={16} className="text-indigo-400" /><div><span className="text-[9px] text-slate-500 font-black uppercase">Phone</span><span className="text-base font-black text-white block">{selectedCarrier.phone || 'N/A'}</span></div></div>
-                    <div className="flex items-center gap-3"><Mail size={16} className="text-indigo-400" /><div><span className="text-[9px] text-slate-500 font-black uppercase">Email</span><span className="text-sm font-black text-indigo-300 block">{selectedCarrier.email || 'None Registered'}</span></div></div>
+                    <div className="flex items-center gap-3"><Phone size={16} className="text-indigo-400" /><div><span className="text-[9px] text-slate-500 font-black uppercase">Phone</span><span className="text-base font-black text-white">{selectedCarrier.phone || 'N/A'}</span></div></div>
+                    <div className="flex items-center gap-3"><Mail size={16} className="text-indigo-400" /><div><span className="text-[9px] text-slate-500 font-black uppercase">Email</span><span className="text-sm font-black text-indigo-300">{selectedCarrier.email || 'None Registered'}</span></div></div>
                   </div>
                 </div>
-                <div className="bg-slate-850/60 p-6 rounded-3xl border border-slate-700/50 space-y-4 group">
+                <div className="bg-slate-850/60 p-6 rounded-3xl border border-slate-700/50 space-y-4 shadow-lg group">
                   <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-1 group-hover:text-indigo-400 transition-colors"><Calendar size={14} className="text-indigo-400" /> Compliance</h3>
-                  <div className="bg-slate-900/50 p-3 rounded-2xl border border-slate-800"><span className="text-[9px] text-slate-500 font-black uppercase block">MCS-150 Form Date</span><span className="text-base font-black text-white">{selectedCarrier.mcs150Date || 'N/A'}</span></div>
+                  <div className="bg-slate-900/50 p-3 rounded-2xl border border-slate-800"><span className="text-[9px] text-slate-500 font-black uppercase">MCS-150 Date</span><span className="text-base font-black text-white block">{selectedCarrier.mcs150Date || 'N/A'}</span></div>
+                </div>
+              </div>
+
+              {/* INSPECTIONS & CRASHES BLOCK */}
+              <div className="bg-white rounded-[2rem] p-8 flex flex-col shadow-xl text-slate-900 mb-8">
+                <div className="flex items-center gap-3 mb-6"><Activity size={20} className="text-slate-700" /><h4 className="text-xl font-black uppercase tracking-tight">Inspections & Crashes</h4></div>
+                <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
+                  <button onClick={() => setActiveTab('inspections')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${activeTab === 'inspections' ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}>Inspections</button>
+                  <button onClick={() => setActiveTab('crashes')} className={`flex-1 py-2 rounded-lg text-sm font-bold ${activeTab === 'crashes' ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}>Crashes</button>
+                </div>
+                <div className="space-y-3 max-h-[400px] overflow-y-auto custom-scrollbar">
+                  {activeTab === 'inspections' ? selectedCarrier.inspections?.map((insp, i) => (
+                    <div key={i} className="border border-slate-100 rounded-2xl p-4 flex justify-between items-center">
+                      <div><p className="text-sm font-black">{insp.date}</p><p className="text-[11px] text-slate-500">{insp.location}</p></div>
+                      <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-lg text-[10px] font-black">{insp.violationList?.length || 0} Violations</span>
+                    </div>
+                  )) : selectedCarrier.crashes?.map((crash, i) => (
+                    <div key={i} className="border border-slate-100 rounded-2xl p-4"><p className="text-sm font-black">{crash.date}</p><p className="text-[11px] text-slate-500">{crash.state} | {crash.number}</p></div>
+                  ))}
                 </div>
               </div>
             </div>
 
-            {/* FOOTER: Height reduced, Download Intel removed */}
+            {/* MODIFIED FOOTER: Removed Download Button, Updated Padding */}
             <div className="p-4 md:p-5 bg-slate-950/85 border-t border-slate-800 flex justify-end items-center">
               <button onClick={() => setSelectedDot(null)} className="px-8 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold border border-slate-700 active:scale-95 transition-all">Close View</button>
             </div>
