@@ -36,6 +36,16 @@ export interface Inspection {
   violationList: InspectionViolation[];
 }
 
+export interface Crash {
+  date: string;
+  number: string;
+  state: string;
+  plateNumber: string;
+  plateState: string;
+  fatal: string;
+  injuries: string;
+}
+
 export interface CarrierData {
   mcNumber: string;
   dotNumber: string;
@@ -66,8 +76,9 @@ export interface CarrierData {
   safetyRatingDate?: string;
   basicScores?: BasicScore[];
   oosRates?: OosRate[];
-  // Inspections
+  // Inspections & Crashes
   inspections?: Inspection[];
+  crashes?: Crash[];
 }
 
 export interface ScraperConfig {
