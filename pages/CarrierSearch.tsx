@@ -507,7 +507,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                 </div>
               </div>
 
-              {/* THIRD ROW: Safety Information | Inspections & Crashes (2 Cols, 50/50) */}
+              {/* THIRD ROW: Safety Information | Inspection History (2 Cols, 50/50) */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col gap-6 shadow-2xl relative">
                   <div className="flex items-center justify-between">
@@ -574,14 +574,14 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   )}
                 </div>
 
-                {/* NEW: Inspections & Crashes Section with Emerald Theme */}
+                {/* MODIFIED: Inspection History Section - Emerald Theme & SearchCarriers UI */}
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col shadow-2xl">
                   <div className="flex items-center gap-3 mb-6">
                     <Activity size={20} className="text-emerald-400" />
                     <h4 className="text-xl font-black text-white uppercase tracking-tight">Inspections & Crashes</h4>
                   </div>
 
-                  {/* Summary Stats */}
+                  {/* Summary Stats Bar */}
                   {selectedCarrier.inspections && selectedCarrier.inspections.length > 0 && (
                     <div className="grid grid-cols-4 gap-3 mb-6 pb-6 border-b border-slate-700/50">
                       <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-800 flex flex-col items-center">
@@ -603,7 +603,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                     </div>
                   )}
 
-                  {/* Inspection List */}
                   <div className="space-y-3 flex-1 overflow-y-auto custom-scrollbar pr-2">
                     {selectedCarrier.inspections && selectedCarrier.inspections.length > 0 ? (
                       selectedCarrier.inspections.slice(0, 5).map((insp: any, i: number) => (
@@ -612,43 +611,41 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                             onClick={() => setExpandedInspectionId(expandedInspectionId === i ? null : i)}
                             className="w-full text-left bg-slate-900/60 hover:bg-slate-900 p-4 rounded-xl border border-slate-700/50 hover:border-emerald-500/30 transition-all group"
                           >
-                            <div className="flex justify-between items-start mb-2">
+                            <div className="flex justify-between items-start">
                               <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-2">
+                                <div className="flex items-center gap-2 mb-1">
                                   <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">{insp.date}</span>
                                   <span className="text-[10px] font-bold text-slate-400">{insp.location}</span>
                                 </div>
                                 <p className="text-xs font-bold text-slate-300">Level III - Driver Only</p>
                               </div>
                               <div className="flex items-center gap-2">
-                                {insp.oosViolations > 0 && (
+                                {insp.oosViolations > 0 ? (
                                   <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">{insp.oosViolations} Violations OOS</span>
+                                ) : (
+                                  <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20">Clean</span>
                                 )}
                                 <ChevronDown size={16} className={`text-slate-500 transition-transform ${expandedInspectionId === i ? 'rotate-180' : ''}`} />
                               </div>
                             </div>
                           </button>
 
-                          {/* Expanded Violation Details */}
-                          {expandedInspectionId === i && insp.violationList && insp.violationList.length > 0 && (
+                          {/* Expanded Quick View with More Details Button */}
+                          {expandedInspectionId === i && (
                             <div className="bg-slate-900/40 p-4 rounded-xl border border-emerald-500/20 space-y-3 animate-in slide-in-from-top-2 duration-200">
-                              <div className="flex justify-between items-center mb-3">
-                                <h5 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Violation Details</h5>
+                              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">OOS</span><span className="text-emerald-400 font-bold">{insp.oosViolations}</span></div>
+                                <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">Driver</span><span className="text-emerald-400 font-bold">{insp.driverViolations}</span></div>
+                                <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">Vehicle</span><span className="text-emerald-400 font-bold">{insp.vehicleViolations}</span></div>
+                                <div className="bg-slate-800/50 p-2 rounded border border-slate-700"><span className="text-slate-500 block">Hazmat</span><span className="text-emerald-400 font-bold">{insp.hazmatViolations}</span></div>
+                              </div>
+                              <div className="flex justify-end">
                                 <button
                                   onClick={() => setSelectedViolationDetail(insp)}
                                   className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 uppercase bg-emerald-500/10 px-3 py-1 rounded border border-emerald-500/20 transition-colors"
                                 >
                                   More Details
                                 </button>
-                              </div>
-                              <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
-                                {insp.violationList.map((v: any, idx: number) => (
-                                  <div key={idx} className="bg-slate-800/50 p-2 rounded border border-slate-700/50 text-[9px]">
-                                    <p className="font-bold text-emerald-300 mb-1">{v.label}</p>
-                                    <p className="text-slate-400 line-clamp-2">{v.description}</p>
-                                    <p className="text-slate-500 mt-1">Weight: {v.weight}</p>
-                                  </div>
-                                ))}
                               </div>
                             </div>
                           )}
@@ -676,7 +673,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
         </div>
       )}
 
-      {/* Violation Detail Modal */}
+      {/* Violation Detail Modal Card */}
       {selectedViolationDetail && (
         <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-slate-900 border-2 border-emerald-500/30 w-full max-w-2xl max-h-[90vh] rounded-[2rem] shadow-2xl overflow-hidden flex flex-col animate-in zoom-in duration-300">
@@ -695,42 +692,38 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6">
-              
-              {/* Report Summary */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-slate-850/60 p-4 rounded-xl border border-emerald-500/20">
-                  <span className="text-[9px] text-slate-500 font-black uppercase block mb-2">Report #</span>
+                  <span className="text-[9px] text-slate-500 font-black uppercase block mb-2">Report #:</span>
                   <span className="text-base font-black text-emerald-400 font-mono">{selectedViolationDetail.reportNumber}</span>
                 </div>
                 <div className="bg-slate-850/60 p-4 rounded-xl border border-emerald-500/20">
-                  <span className="text-[9px] text-slate-500 font-black uppercase block mb-2">Location</span>
+                  <span className="text-[9px] text-slate-500 font-black uppercase block mb-2">Location:</span>
                   <span className="text-base font-black text-white">{selectedViolationDetail.location}</span>
                 </div>
               </div>
 
-              {/* Violation Counts */}
               <div className="grid grid-cols-4 gap-3">
                 <div className="bg-slate-900/50 p-3 rounded-xl border border-emerald-500/20 flex flex-col items-center">
-                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">OOS</span>
+                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">OOS Violations:</span>
                   <span className="text-xl font-black text-emerald-400">{selectedViolationDetail.oosViolations || 0}</span>
                 </div>
                 <div className="bg-slate-900/50 p-3 rounded-xl border border-emerald-500/20 flex flex-col items-center">
-                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Driver</span>
+                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Driver Violations:</span>
                   <span className="text-xl font-black text-emerald-400">{selectedViolationDetail.driverViolations || 0}</span>
                 </div>
                 <div className="bg-slate-900/50 p-3 rounded-xl border border-emerald-500/20 flex flex-col items-center">
-                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Vehicle</span>
+                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Vehicle Violations:</span>
                   <span className="text-xl font-black text-emerald-400">{selectedViolationDetail.vehicleViolations || 0}</span>
                 </div>
                 <div className="bg-slate-900/50 p-3 rounded-xl border border-emerald-500/20 flex flex-col items-center">
-                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Hazmat</span>
+                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Hazmat Violations:</span>
                   <span className="text-xl font-black text-emerald-400">{selectedViolationDetail.hazmatViolations || 0}</span>
                 </div>
               </div>
 
-              {/* Violation List */}
               <div>
-                <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-4">Full Violation List</h4>
+                <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-4">Violation List</h4>
                 <div className="space-y-3">
                   {selectedViolationDetail.violationList?.map((v: any, idx: number) => (
                     <div key={idx} className="bg-slate-850/60 p-4 rounded-xl border border-emerald-500/20 space-y-2">
@@ -743,7 +736,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   ))}
                 </div>
               </div>
-
             </div>
 
             <div className="p-6 bg-slate-950/70 border-t border-emerald-500/20 flex justify-end">
