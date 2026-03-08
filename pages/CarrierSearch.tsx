@@ -282,22 +282,43 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                           </div>
                           
                           {expandedInspection === insp.reportNumber && (
-                            <div className="px-4 pb-4 pt-2 border-t border-slate-50 bg-slate-50/50">
-                              <div className="grid grid-cols-3 gap-4 mb-4">
-                                <div><span className="text-[9px] text-slate-400 font-bold uppercase">Report #</span><p className="text-xs font-bold">{insp.reportNumber}</p></div>
-                                <div><span className="text-[9px] text-slate-400 font-bold uppercase">OOS Viol.</span><p className="text-xs font-bold">{insp.oosViolations}</p></div>
-                                <div><span className="text-[9px] text-slate-400 font-bold uppercase">Driver Viol.</span><p className="text-xs font-bold">{insp.driverViolations}</p></div>
+                            <div className="px-4 pb-4 pt-4 border-t border-slate-100 bg-[#F8F9FA]">
+                              <div className="grid grid-cols-3 grid-rows-2 gap-y-4 gap-x-6 mb-6">
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">Report #:</span>
+                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.reportNumber}</span>
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">Location:</span>
+                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.location}</span>
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">OOS Violations:</span>
+                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.oosViolations}</span>
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">Driver Violations:</span>
+                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.driverViolations}</span>
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">Vehicle Violations:</span>
+                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.vehicleViolations}</span>
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)]">Hazmat Violations:</span>
+                                  <span className="text-[14px] leading-[20px] font-medium text-[oklch(0.372_0.044_257.287)]">{insp.hazmatViolations}</span>
+                                </div>
                               </div>
                               {insp.violationList?.length > 0 && (
-                                <div className="space-y-2">
-                                  <span className="text-[9px] text-slate-400 font-bold uppercase">Violation Details</span>
+                                <div className="space-y-2 mt-4 pt-4 border-t border-slate-200">
+                                  <span className="text-[12px] leading-[16px] font-normal text-[oklch(0.554_0.046_257.417)] uppercase tracking-wider">Violation Details</span>
                                   {insp.violationList.map((v: any, vi: number) => (
-                                    <div key={vi} className="bg-white p-2 rounded-lg border border-slate-100 text-[10px] relative group/viol">
+                                    <div key={vi} className="bg-white p-3 rounded-xl border border-slate-200 text-[11px] relative group/viol shadow-sm">
                                       <div className="flex justify-between font-bold mb-1">
                                         <span className="text-blue-600">{v.label}</span>
                                         <span className="text-slate-400">Weight: {v.weight}</span>
                                       </div>
-                                      <p className="text-slate-600 leading-tight">{v.description}</p>
+                                      <p className="text-slate-600 leading-relaxed">{v.description}</p>
                                     </div>
                                   ))}
                                 </div>
