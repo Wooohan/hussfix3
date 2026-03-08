@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Eye, X, MapPin, Phone, Mail, Hash, Truck, Calendar, ShieldCheck, Download, ShieldAlert, Activity, Info, Globe, Map as MapIcon, Boxes, Shield, ExternalLink, CheckCircle2, AlertTriangle, Zap, Loader2, ChevronDown, ChevronUp, Copy, Check } from 'lucide-react';
+import { Search, Eye, X, MapPin, Phone, Mail, Hash, Truck, Calendar, ShieldCheck, Download, ShieldAlert, Activity, Info, Globe, Map as MapIcon, Boxes, Shield, ExternalLink, CheckCircle2, AlertTriangle, Zap, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { CarrierData } from '../types';
 import { downloadCSV } from '../services/mockService';
 import { CarrierFilters } from '../services/supabaseClient';
@@ -145,7 +145,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
   const [nameSearchTerm, setNameSearchTerm] = useState('');
   const [selectedDot, setSelectedDot] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // States for the new Inspections & Crashes UI
   const [activeTab, setActiveTab] = useState<'inspections' | 'crashes'>('inspections');
@@ -181,12 +180,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
     towawayMin: '', towawayMax: '',
     inspectionsMin: '', inspectionsMax: '',
   });
-
-  const handleCopy = (text: string, field: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedField(field);
-    setTimeout(() => setCopiedField(null), 2000);
-  };
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -531,52 +524,19 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm animate-in fade-in duration-300">
           <div className="bg-slate-900 border-2 border-slate-700/50 w-full max-w-7xl max-h-[95vh] rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col relative animate-in zoom-in slide-in-from-bottom-4 duration-300">
 
-            {/* MODIFIED HEADER: Added Emerald Green styled tags and No Registered DBA below */}
-            <div className="p-6 md:p-8 border-b border-slate-800 bg-slate-850/30 flex justify-between items-start">
+            <div className="p-6 md:p-8 border-b border-slate-800 bg-slate-850/30 flex justify-between items-center">
               <div className="flex gap-4 md:gap-8 items-center">
                 <div className="w-14 h-14 md:w-16 md:h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-500/10">
                   <Truck size={24} className="md:w-10 md:h-10" />
                 </div>
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-4 mb-2">
+                  <div className="flex flex-wrap items-center gap-4 mb-1">
                     <h2 className="text-xl md:text-3xl font-black text-white uppercase tracking-tighter truncate max-w-[300px] md:max-w-[700px] leading-tight">{selectedCarrier.legalName}</h2>
                     <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border-2 ${selectedCarrier.status?.includes('NOT AUTHORIZED') ? 'bg-red-500/10 text-red-400 border-red-500/30' : 'bg-green-500/10 text-green-400 border-green-500/30'}`}>
                       {selectedCarrier.status?.includes('NOT AUTHORIZED') ? 'Unauthorized' : 'Active Authority'}
                     </span>
                   </div>
-                  
-                  <div className="flex flex-col gap-3">
-                    <p className="text-sm md:text-base text-slate-400 font-medium italic opacity-60 leading-none">
-                      {selectedCarrier.dbaName || 'No Registered DBA'}
-                    </p>
-                    
-                    {/* BADGE ROW: Styled exactly like reference image */}
-                    <div className="flex items-center gap-2 mt-1">
-                      <button 
-                        onClick={() => handleCopy(selectedCarrier.dotNumber, 'dot')}
-                        className="bg-[#2563EB] border border-white/40 rounded px-2.5 py-1.5 flex items-center gap-2 group transition-all active:scale-95 shadow-lg"
-                      >
-                        <span className="text-white font-black text-xs md:text-sm tracking-wide">
-                          DOT <span className="ml-1">{selectedCarrier.dotNumber}</span>
-                        </span>
-                        {copiedField === 'dot' ? <Check size={12} className="text-green-300" /> : <Copy size={12} className="text-white/40 group-hover:text-white transition-colors" />}
-                      </button>
-
-                      <button 
-                        onClick={() => handleCopy(selectedCarrier.mcNumber || '', 'mc')}
-                        className="bg-[#2563EB] border-2 border-[#10B981] rounded px-2.5 py-1.5 flex items-center gap-2 group transition-all active:scale-95 shadow-lg"
-                      >
-                        <span className="text-white font-black text-xs md:text-sm tracking-wide">
-                          MC <span className="ml-1">{selectedCarrier.mcNumber}</span>
-                        </span>
-                        {copiedField === 'mc' ? <Check size={12} className="text-green-300" /> : <Copy size={12} className="text-white/40 group-hover:text-white transition-colors" />}
-                      </button>
-
-                      <div className="bg-[#E2FBE9] border border-[#A7F3D0] rounded px-4 py-1.5 shadow-sm">
-                        <span className="text-[#15803D] font-black text-xs md:text-sm">Carrier</span>
-                      </div>
-                    </div>
-                  </div>
+                  <p className="text-sm md:text-base text-slate-400 font-medium italic opacity-60">{selectedCarrier.dbaName || 'No Registered DBA'}</p>
                 </div>
               </div>
               <button onClick={() => setSelectedDot(null)} className="p-3 text-slate-500 hover:text-white hover:bg-slate-800 rounded-2xl transition-all active:scale-75">
@@ -936,10 +896,9 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
 
             </div>
 
-            {/* MODIFIED FOOTER: Reduced height to ~25% (p-4 instead of p-8) */}
-            <div className="p-4 md:p-5 bg-slate-950/85 border-t border-slate-800 flex justify-end gap-4 items-center">
-              <button onClick={() => setSelectedDot(null)} className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold border border-slate-700 active:scale-95 transition-all">Close View</button>
-              <button className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-black shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-2 active:scale-95 transition-all group">
+            <div className="p-6 md:p-8 bg-slate-950/70 border-t border-slate-800 flex justify-end gap-4">
+              <button onClick={() => setSelectedDot(null)} className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold border border-slate-700 active:scale-95 transition-all">Close View</button>
+              <button className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-black shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-2 active:scale-95 transition-all group">
                 <Download size={18} className="group-hover:-translate-y-0.5 transition-transform" /> Download Intel Report
               </button>
             </div>
