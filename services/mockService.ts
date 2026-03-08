@@ -184,101 +184,93 @@ export const fetchSafetyData = async (dot: string): Promise<{
 // INSPECTION DATA — exported for main scraper
 // Fetches FMCSA inspection history and violations
 // ============================================================
-export const fetchInspectionData = async (dot: string): Promise<{
+export const fetchInspectionAndCrashData = async (dot: string): Promise<{
   inspections: any[];
+  crashes: any[];
 }> => {
-  if (!dot) return { inspections: [] };
+  if (!dot) return { inspections: [], crashes: [] };
 
   const html = await fetchFmcsa(
     `https://ai.fmcsa.dot.gov/SMS/Carrier/${dot}/CompleteProfile.aspx`
   );
-  if (!html) return { inspections: [] };
+  if (!html) return { inspections: [], crashes: [] };
 
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const inspections: any[] = [];
+  const crashes: any[] = [];
 
   try {
-    // Find the inspection table
-    const table = doc.querySelector('table[id="inspectionTable"]');
-    if (!table) return { inspections: [] };
+    // --- PART 1: INSPECTIONS ---
+    const iTable = doc.querySelector('table[id="inspectionTable"]');
+    if (iTable) {
+      const iTbody = iTable.querySelector('tbody.dataBody');
+      if (iTbody) {
+        const iRows = iTbody.querySelectorAll('tr');
+        let currentReport: any = null;
 
-    const tbody = table.querySelector('tbody.dataBody');
-    if (!tbody) return { inspections: [] };
+        iRows.forEach((row) => {
+          const rowClasses = row.getAttribute('class') || '';
+          if (rowClasses.includes('inspection')) {
+            if (currentReport) inspections.push(currentReport);
+            const cols = row.querySelectorAll('td');
+            if (cols.length >= 3) {
+              currentReport = {
+                reportNumber: cleanText(cols[1]?.textContent),
+                location: cleanText(cols[2]?.textContent),
+                date: cleanText(cols[0]?.textContent),
+                oosViolations: 0, driverViolations: 0, vehicleViolations: 0, hazmatViolations: 0,
+                violationList: []
+              };
+            }
+          } else if (rowClasses.includes('viol') && currentReport) {
+            const label = row.querySelector('label')?.textContent || '';
+            const violDesc = cleanText(row.querySelector('span.violCodeDesc')?.textContent);
+            const violWeight = cleanText(row.querySelector('td.weight')?.textContent);
+            currentReport.violationList.push({ label: cleanText(label), description: violDesc, weight: violWeight });
 
-    const rows = tbody.querySelectorAll('tr');
-    let currentReport: any = null;
-
-    rows.forEach((row) => {
-      const rowClasses = row.getAttribute('class') || '';
-
-      // Detect new inspection
-      if (rowClasses.includes('inspection')) {
-        if (currentReport) {
-          inspections.push(currentReport);
-        }
-
-        const cols = row.querySelectorAll('td');
-        if (cols.length >= 3) {
-          currentReport = {
-            reportNumber: cleanText(cols[1]?.textContent),
-            location: cleanText(cols[2]?.textContent),
-            date: cleanText(cols[0]?.textContent),
-            oosViolations: 0,
-            driverViolations: 0,
-            vehicleViolations: 0,
-            hazmatViolations: 0,
-            violationList: []
-          };
-        }
+            const labelLower = label.toLowerCase();
+            if (rowClasses.includes('oos') || violDesc.toLowerCase().includes('(oos)')) currentReport.oosViolations++;
+            if (labelLower.includes('vehicle maint')) currentReport.vehicleViolations++;
+            else if (any(labelLower, ['driver fitness', 'unsafe driving', 'hos compliance', 'drugs/alcohol'])) currentReport.driverViolations++;
+            else if (labelLower.includes('hazmat') || labelLower.includes('hm compliance')) currentReport.hazmatViolations++;
+            else currentReport.vehicleViolations++;
+          }
+        });
+        if (currentReport) inspections.push(currentReport);
       }
-      // Categorize violations
-      else if (rowClasses.includes('viol') && currentReport) {
-        const label = row.querySelector('label')?.textContent || '';
-        const violDescElement = row.querySelector('span.violCodeDesc');
-        const violDesc = violDescElement ? cleanText(violDescElement.textContent) : '';
-        const weightElement = row.querySelector('td.weight');
-        const violWeight = weightElement ? cleanText(weightElement.textContent) : '';
+    }
 
-        const fullDetail = {
-          label: cleanText(label),
-          description: violDesc,
-          weight: violWeight
-        };
-
-        currentReport.violationList.push(fullDetail);
-
-        // Count violations by type
-        const labelLower = label.toLowerCase();
-        if (rowClasses.includes('oos') || violDesc.toLowerCase().includes('(oos)')) {
-          currentReport.oosViolations++;
-        }
-        if (labelLower.includes('vehicle maint')) {
-          currentReport.vehicleViolations++;
-        } else if (
-          labelLower.includes('driver fitness') ||
-          labelLower.includes('unsafe driving') ||
-          labelLower.includes('hos compliance') ||
-          labelLower.includes('drugs/alcohol')
-        ) {
-          currentReport.driverViolations++;
-        } else if (labelLower.includes('hazmat') || labelLower.includes('hm compliance')) {
-          currentReport.hazmatViolations++;
-        } else {
-          currentReport.vehicleViolations++;
-        }
+    // --- PART 2: CRASHES ---
+    const cTable = doc.querySelector('table[id="crashTable"]');
+    if (cTable) {
+      const cTbody = cTable.querySelector('tbody.dataBody');
+      if (cTbody) {
+        const cRows = cTbody.querySelectorAll('tr.crash');
+        cRows.forEach(row => {
+          const cols = row.querySelectorAll('td');
+          if (cols.length >= 7) {
+            crashes.push({
+              date: cleanText(cols[0]?.textContent),
+              number: cleanText(cols[1]?.textContent),
+              state: cleanText(cols[2]?.textContent),
+              plateNumber: cleanText(cols[3]?.textContent),
+              plateState: cleanText(cols[4]?.textContent),
+              fatal: cleanText(cols[5]?.textContent),
+              injuries: cleanText(cols[6]?.textContent)
+            });
+          }
+        });
       }
-    });
-
-    // Add last inspection if exists
-    if (currentReport) {
-      inspections.push(currentReport);
     }
   } catch (e) {
-    console.error('Error parsing inspection data:', e);
+    console.error('Error parsing inspection/crash data:', e);
   }
 
-  return { inspections };
+  return { inspections, crashes };
 };
+
+// Helper for any check
+const any = (str: string, terms: string[]) => terms.some(t => str.includes(t));
 
 // ============================================================
 // INSURANCE DATA — exported for InsuranceScraper
@@ -374,12 +366,12 @@ export const scrapeRealCarrier = async (
   let status = getVal('Operating Authority Status:');
   status = status.replace(/(\*Please Note|Please Note|For Licensing)[\s\S]*/i, '').replace(/\s+/g, ' ').trim();
 
-  // ── Requests 2, 3, & 4: Email + Safety + Inspections (parallel) ──
-  const [email, safety, inspectionData] = dotNumber
+  // ── Requests 2, 3, & 4: Email + Safety + Inspections/Crashes (parallel) ──
+  const [email, safety, inspectionAndCrashData] = dotNumber
     ? await Promise.all([
         findDotEmail(dotNumber),
         fetchSafetyData(dotNumber),
-        fetchInspectionData(dotNumber)
+        fetchInspectionAndCrashData(dotNumber)
       ])
     : ['', null, null];
 
@@ -411,7 +403,8 @@ export const scrapeRealCarrier = async (
     safetyRatingDate: safety?.ratingDate || '',
     basicScores:      safety?.basicScores || [],
     oosRates:         safety?.oosRates    || [],
-    inspections:      inspectionData?.inspections || []
+    inspections:      inspectionAndCrashData?.inspections || [],
+    crashes:          inspectionAndCrashData?.crashes || []
   };
 };
 
