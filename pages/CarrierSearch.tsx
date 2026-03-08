@@ -145,6 +145,8 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
   const [nameSearchTerm, setNameSearchTerm] = useState('');
   const [selectedDot, setSelectedDot] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  
+  // States added for the new Inspection UI
   const [expandedInspectionId, setExpandedInspectionId] = useState<number | null>(null);
   const [selectedViolationDetail, setSelectedViolationDetail] = useState<any>(null);
 
@@ -235,105 +237,286 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
     setFilters({
       active: '', state: [], dot: '', yearsInBusinessMin: '', yearsInBusinessMax: '',
       hasEmail: '', hasBoc3: '', hasCompanyRep: '',
-      classification: [], carrierOperation: [], hazmat: ''
-    } as any);
+      classification: [], carrierOperation: [], hazmat: '',
+      powerUnitsMin: '', powerUnitsMax: '', driversMin: '', driversMax: '', cargo: [],
+      insuranceRequired: [], bipdMin: '', bipdMax: '', bipdOnFile: '', cargoOnFile: '', bondOnFile: '',
+      oosMin: '', oosMax: '', crashesMin: '', crashesMax: '',
+      injuriesMin: '', injuriesMax: '', fatalitiesMin: '', fatalitiesMax: '',
+      towawayMin: '', towawayMax: '', inspectionsMin: '', inspectionsMax: '',
+    });
+    onSearch({});
   };
 
   const selectedCarrier = selectedDot ? carriers.find(c => c.dotNumber === selectedDot) : null;
 
+  const yesNoOptions = [
+    { value: '', label: 'Any' },
+    { value: 'true', label: 'Yes' },
+    { value: 'false', label: 'No' },
+  ];
+
+  const yesNoNumOptions = [
+    { value: '', label: 'Any' },
+    { value: '1', label: 'Yes' },
+    { value: '0', label: 'No' },
+  ];
+
   return (
-    <div className="w-full">
-      {/* Search and Filter Section */}
-      <div className="bg-gradient-to-b from-slate-900 to-slate-950 border-b border-slate-800 p-6 md:p-8 sticky top-0 z-40 shadow-2xl">
-        <div className="max-w-7xl mx-auto space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-2 space-y-2">
-              <label className="block text-[10px] font-bold text-slate-500 uppercase">Search by MC or Name</label>
-              <div className="flex gap-2">
-                <input type="text" value={mcSearchTerm} onChange={(e) => setMcSearchTerm(e.target.value)} placeholder="MC/MX Number..." className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500" />
-                <input type="text" value={nameSearchTerm} onChange={(e) => setNameSearchTerm(e.target.value)} placeholder="Company Name..." className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-indigo-500" />
-              </div>
-            </div>
-            <div className="flex gap-2 items-end">
-              <button onClick={applyFilters} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-6 py-3 font-bold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-indigo-600/20">
-                <Search size={18} /> Search
-              </button>
-              <button onClick={() => setShowFilters(!showFilters)} className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl border border-slate-700 transition-all">
-                <ChevronDown size={18} />
-              </button>
-            </div>
-          </div>
-
-          {showFilters && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <FilterGroup title="Status" icon={<CheckCircle2 size={14} />}>
-                <FilterSelect name="active" value={filters.active} onChange={handleFilterChange} options={[{ value: '', label: 'All' }, { value: 'yes', label: 'Active' }, { value: 'no', label: 'Inactive' }]} />
-              </FilterGroup>
-              <FilterGroup title="Location" icon={<MapIcon size={14} />}>
-                <MultiSelect options={US_STATES} selected={filters.state} onChange={(state) => setFilters(prev => ({ ...prev, state }))} />
-              </FilterGroup>
-              <FilterGroup title="Fleet" icon={<Truck size={14} />}>
-                <FilterLabel>Power Units</FilterLabel>
-                <MinMaxInputs nameMin="powerUnitsMin" nameMax="powerUnitsMax" valueMin={filters.powerUnitsMin} valueMax={filters.powerUnitsMax} onChange={handleFilterChange} />
-              </FilterGroup>
-              <FilterGroup title="Safety" icon={<Shield size={14} />}>
-                <FilterLabel>OOS Violations</FilterLabel>
-                <MinMaxInputs nameMin="oosMin" nameMax="oosMax" valueMin={filters.oosMin} valueMax={filters.oosMax} onChange={handleFilterChange} />
-              </FilterGroup>
-            </div>
-          )}
-
-          <button onClick={resetAll} className="text-xs font-bold text-slate-500 hover:text-slate-300 uppercase tracking-widest">Reset All Filters</button>
+    <div className="p-4 md:p-8 h-screen flex flex-col overflow-hidden relative selection:bg-indigo-500/30">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-extrabold text-white mb-1 tracking-tight">Carrier Database</h1>
+          <p className="text-slate-400 text-sm">
+            Showing <span className="text-indigo-400 font-bold">{carriers.length}</span> records
+            {carriers.length === 200 && <span className="text-slate-500"> (default 200 — use filters to search all)</span>}
+          </p>
+        </div>
+        <div className="flex gap-3 w-full md:w-auto">
+          <button
+            onClick={onNavigateToInsurance}
+            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-500/20 active:scale-95"
+          >
+            <ShieldAlert size={16} /> Batch Enrichment Pipeline
+          </button>
+          <button
+            onClick={() => downloadCSV(carriers)}
+            disabled={carriers.length === 0}
+            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold transition-all border border-slate-700 active:scale-95"
+          >
+            <Download size={16} /> Export CSV
+          </button>
         </div>
       </div>
 
-      {/* Results Table */}
-      <div className="p-6 md:p-8 bg-slate-950">
-        <div className="max-w-7xl mx-auto">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-20"><Loader2 size={32} className="text-indigo-400 animate-spin" /></div>
-          ) : carriers.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-slate-600 text-center">
-              <Search size={48} className="opacity-20 mb-4" />
-              <p className="text-sm font-bold uppercase tracking-widest">No Results Found</p>
-              <p className="text-xs text-slate-500 mt-2">Try adjusting your search criteria</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-2xl border border-slate-800 shadow-2xl">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-900 border-b border-slate-800">
-                  <tr>
-                    <th className="p-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">Company Name</th>
-                    <th className="p-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">MC/MX</th>
-                    <th className="p-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">DOT</th>
-                    <th className="p-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">Status</th>
-                    <th className="p-4 text-left text-xs font-black text-slate-400 uppercase tracking-widest">Location</th>
-                    <th className="p-4 text-right text-xs font-black text-slate-400 uppercase tracking-widest">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {carriers.map((carrier, idx) => (
-                    <tr key={idx} className="hover:bg-slate-900/50 transition-colors">
-                      <td className="p-4"><span className="font-bold text-white">{carrier.legalName}</span></td>
-                      <td className="p-4"><span className="font-mono text-indigo-400">{carrier.mcNumber}</span></td>
-                      <td className="p-4"><span className="font-mono text-slate-300">{carrier.dotNumber}</span></td>
-                      <td className="p-4"><span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${carrier.status?.includes('NOT AUTHORIZED') ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>{carrier.status?.includes('NOT AUTHORIZED') ? 'Unauthorized' : 'Active'}</span></td>
-                      <td className="p-4 text-slate-400">{carrier.physicalAddress?.split(',')[0]}</td>
-                      <td className="p-4 text-right">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setSelectedDot(carrier.dotNumber); }}
-                          className="p-2 bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white rounded-xl transition-all shadow-lg active:scale-95"
-                        >
-                          <Eye size={18} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                }
-              </tbody>
-            </table>
+      <div className="flex gap-3 mb-4">
+        <div className="relative group w-52 shrink-0">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 group-focus-within:text-indigo-400 transition-colors">
+            <Hash size={16} />
           </div>
+          <input
+            type="text"
+            placeholder="Search MC#..."
+            className="w-full bg-slate-850/80 border border-slate-700/50 rounded-2xl pl-9 pr-3 py-3 text-white text-sm focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all shadow-xl"
+            value={mcSearchTerm}
+            onChange={(e) => setMcSearchTerm(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+          />
+        </div>
+
+        <div className="flex-1 relative group">
+          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-indigo-400 transition-colors">
+            <Search size={18} />
+          </div>
+          <input
+            type="text"
+            placeholder="Search by Business Name..."
+            className="w-full bg-slate-850/80 border border-slate-700/50 rounded-2xl pl-11 pr-4 py-3 text-white text-sm focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all shadow-xl"
+            value={nameSearchTerm}
+            onChange={(e) => setNameSearchTerm(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
+          />
+        </div>
+
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className={`px-5 py-3 rounded-2xl font-bold transition-all flex items-center gap-2 border text-sm ${showFilters ? 'bg-indigo-600 text-white border-indigo-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+        >
+          <Zap size={16} className={showFilters ? 'fill-white' : ''} />
+          {showFilters ? 'Hide Filters' : 'Advanced Filters'}
+        </button>
+
+        <button
+          onClick={applyFilters}
+          disabled={isLoading}
+          className="px-7 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white rounded-2xl font-bold transition-all shadow-lg shadow-indigo-500/20 active:scale-95 flex items-center gap-2 text-sm"
+        >
+          {isLoading ? (
+            <><Loader2 size={16} className="animate-spin" /> Searching...</>
+          ) : (
+            <><Search size={16} /> Search</>
           )}
+        </button>
+      </div>
+
+      {showFilters && (
+        <div className="mb-4 p-4 bg-slate-950/80 border border-slate-700/50 rounded-3xl overflow-y-auto max-h-[55vh] custom-scrollbar">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <FilterGroup title="Motor Carrier" icon={<Truck size={12} />}>
+              <div>
+                <FilterLabel>Active</FilterLabel>
+                <FilterSelect name="active" value={filters.active} onChange={handleFilterChange} options={yesNoOptions} />
+              </div>
+              <div>
+                <FilterLabel>State</FilterLabel>
+                <MultiSelect options={US_STATES} selected={filters.state} onChange={v => setFilters(p => ({ ...p, state: v }))} placeholder="All" />
+              </div>
+              <div>
+                <FilterLabel>DOT Number</FilterLabel>
+                <input type="number" name="dot" value={filters.dot} onChange={handleFilterChange} placeholder="" min={0}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-indigo-500" />
+              </div>
+              <div>
+                <FilterLabel>Years in Business</FilterLabel>
+                <MinMaxInputs nameMin="yearsInBusinessMin" nameMax="yearsInBusinessMax"
+                  valueMin={filters.yearsInBusinessMin} valueMax={filters.yearsInBusinessMax} onChange={handleFilterChange} />
+              </div>
+              <div>
+                <FilterLabel>Has Email</FilterLabel>
+                <FilterSelect name="hasEmail" value={filters.hasEmail} onChange={handleFilterChange} options={yesNoOptions} />
+              </div>
+              <div>
+                <FilterLabel>Has BOC-3</FilterLabel>
+                <FilterSelect name="hasBoc3" value={filters.hasBoc3} onChange={handleFilterChange} options={yesNoOptions} />
+              </div>
+              <div>
+                <FilterLabel>Company Rep. Available</FilterLabel>
+                <FilterSelect name="hasCompanyRep" value={filters.hasCompanyRep} onChange={handleFilterChange} options={yesNoOptions} />
+              </div>
+            </FilterGroup>
+
+            <FilterGroup title="Carrier Operation" icon={<Activity size={12} />}>
+              <div>
+                <FilterLabel>Classification</FilterLabel>
+                <MultiSelect options={OPERATION_CLASSIFICATIONS} selected={filters.classification} onChange={v => setFilters(p => ({ ...p, classification: v }))} placeholder="All" />
+              </div>
+              <div>
+                <FilterLabel>Carrier Operation</FilterLabel>
+                <MultiSelect options={CARRIER_OPERATIONS} selected={filters.carrierOperation} onChange={v => setFilters(p => ({ ...p, carrierOperation: v }))} placeholder="All" />
+              </div>
+              <div>
+                <FilterLabel>Hazmat</FilterLabel>
+                <FilterSelect name="hazmat" value={filters.hazmat} onChange={handleFilterChange} options={yesNoOptions} />
+              </div>
+              <div>
+                <FilterLabel>Power Units</FilterLabel>
+                <MinMaxInputs nameMin="powerUnitsMin" nameMax="powerUnitsMax"
+                  valueMin={filters.powerUnitsMin} valueMax={filters.powerUnitsMax} onChange={handleFilterChange} />
+              </div>
+              <div>
+                <FilterLabel>Drivers</FilterLabel>
+                <MinMaxInputs nameMin="driversMin" nameMax="driversMax"
+                  valueMin={filters.driversMin} valueMax={filters.driversMax} onChange={handleFilterChange} />
+              </div>
+              <div>
+                <FilterLabel>Cargo</FilterLabel>
+                <MultiSelect options={CARGO_TYPES} selected={filters.cargo} onChange={v => setFilters(p => ({ ...p, cargo: v }))} placeholder="All" />
+              </div>
+            </FilterGroup>
+
+            <FilterGroup title="Insurance Policy" icon={<Shield size={12} />}>
+              <div>
+                <FilterLabel>Required</FilterLabel>
+                <MultiSelect options={INSURANCE_REQUIRED_TYPES} selected={filters.insuranceRequired} onChange={v => setFilters(p => ({ ...p, insuranceRequired: v }))} placeholder="All" />
+              </div>
+              <div>
+                <FilterLabel>Required BIPD</FilterLabel>
+                <MinMaxInputs nameMin="bipdMin" nameMax="bipdMax"
+                  valueMin={filters.bipdMin} valueMax={filters.bipdMax} onChange={handleFilterChange} />
+              </div>
+              <div>
+                <FilterLabel>Has BIPD Insurance</FilterLabel>
+                <FilterSelect name="bipdOnFile" value={filters.bipdOnFile} onChange={handleFilterChange} options={yesNoNumOptions} />
+              </div>
+              <div>
+                <FilterLabel>Has Cargo Insurance</FilterLabel>
+                <FilterSelect name="cargoOnFile" value={filters.cargoOnFile} onChange={handleFilterChange} options={yesNoNumOptions} />
+              </div>
+              <div>
+                <FilterLabel>Has Bond Insurance</FilterLabel>
+                <FilterSelect name="bondOnFile" value={filters.bondOnFile} onChange={handleFilterChange} options={yesNoNumOptions} />
+              </div>
+            </FilterGroup>
+
+            <FilterGroup title="Safety" icon={<ShieldCheck size={12} />}>
+              <div>
+                <FilterLabel>OOS Violations</FilterLabel>
+                <MinMaxInputs nameMin="oosMin" nameMax="oosMax" valueMin={filters.oosMin} valueMax={filters.oosMax} onChange={handleFilterChange} />
+              </div>
+              <div>
+                <FilterLabel>Crashes</FilterLabel>
+                <MinMaxInputs nameMin="crashesMin" nameMax="crashesMax" valueMin={filters.crashesMin} valueMax={filters.crashesMax} onChange={handleFilterChange} />
+              </div>
+              <div>
+                <FilterLabel>Injuries</FilterLabel>
+                <MinMaxInputs nameMin="injuriesMin" nameMax="injuriesMax" valueMin={filters.injuriesMin} valueMax={filters.injuriesMax} onChange={handleFilterChange} />
+              </div>
+              <div>
+                <FilterLabel>Fatalities</FilterLabel>
+                <MinMaxInputs nameMin="fatalitiesMin" nameMax="fatalitiesMax" valueMin={filters.fatalitiesMin} valueMax={filters.fatalitiesMax} onChange={handleFilterChange} />
+              </div>
+              <div>
+                <FilterLabel>Towaway</FilterLabel>
+                <MinMaxInputs nameMin="towawayMin" nameMax="towawayMin" valueMin={filters.towawayMin} valueMax={filters.towawayMax} onChange={handleFilterChange} />
+              </div>
+              <div>
+                <FilterLabel>Inspections</FilterLabel>
+                <MinMaxInputs nameMin="inspectionsMin" nameMax="inspectionsMax" valueMin={filters.inspectionsMin} valueMax={filters.inspectionsMax} onChange={handleFilterChange} />
+              </div>
+            </FilterGroup>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-800">
+            <button onClick={resetAll} className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-bold transition-all border border-slate-700">
+              Reset All
+            </button>
+            <button onClick={applyFilters} disabled={isLoading}
+              className="px-8 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2">
+              {isLoading ? <><Loader2 size={14} className="animate-spin" /> Searching...</> : 'Apply Filters'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isLoading && (
+        <div className="flex items-center justify-center gap-3 py-4 text-indigo-400 text-sm font-bold">
+          <Loader2 size={20} className="animate-spin" />
+          Fetching records from database...
+        </div>
+      )}
+
+      <div className="flex-1 bg-slate-900/40 border border-slate-700/50 rounded-3xl overflow-hidden flex flex-col shadow-inner min-h-0">
+        <div className="overflow-auto custom-scrollbar flex-1">
+          <table className="w-full text-left text-sm text-slate-300">
+            <thead className="bg-slate-900/90 backdrop-blur sticky top-0 z-10 border-b border-slate-800">
+              <tr>
+                <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">MC Number</th>
+                <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">Legal Name</th>
+                <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">DOT Number</th>
+                <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500">Status</th>
+                <th className="p-4 font-bold text-[10px] uppercase tracking-widest text-slate-500 text-right">View</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/50">
+              {!isLoading && carriers.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-16 text-center text-slate-600 italic">No results found matching your search criteria.</td>
+                </tr>
+              ) : (
+                carriers.map((carrier, idx) => (
+                  <tr key={idx} className="hover:bg-indigo-500/5 transition-colors group cursor-pointer" onClick={() => setSelectedDot(carrier.dotNumber)}>
+                    <td className="p-4 font-mono text-indigo-400 font-bold">{carrier.mcNumber}</td>
+                    <td className="p-4">
+                      <div className="font-bold text-white group-hover:text-indigo-200 transition-colors truncate max-w-[250px]">{carrier.legalName}</div>
+                    </td>
+                    <td className="p-4 font-mono text-slate-400">{carrier.dotNumber}</td>
+                    <td className="p-4">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-black tracking-tight border ${carrier.status?.includes('AUTHORIZED') && !carrier.status?.includes('NOT') ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                        {carrier.status?.includes('AUTHORIZED') && !carrier.status?.includes('NOT') ? 'ACTIVE' : 'INACTIVE'}
+                      </span>
+                    </td>
+                    <td className="p-4 text-right">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSelectedDot(carrier.dotNumber); }}
+                        className="p-2 bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white rounded-xl transition-all shadow-lg active:scale-95"
+                      >
+                        <Eye size={18} />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -486,8 +669,8 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                       selectedCarrier.insurancePolicies.map((p: any, i: number) => (
                         <div key={i} className="bg-slate-900 p-6 rounded-[1.5rem] border border-slate-800 shadow-sm group/policy hover:border-indigo-500/30 transition-all">
                           <div className="flex justify-between items-start mb-4">
-                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{p.type || 'Insurance'}</span>
-                            <span className="text-[10px] font-bold text-emerald-400 uppercase">{p.status || 'Active'}</span>
+                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest border border-indigo-500/10 px-2 py-0.5 rounded-lg">{p.type} FILING</span>
+                            <span className="text-xl font-black text-white">{p.coverageAmount}</span>
                           </div>
                           <p className="text-sm font-black text-slate-200 mb-4 truncate leading-tight group-hover/policy:text-indigo-300 transition-colors uppercase">{p.carrier}</p>
                           <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono pt-4 border-t border-slate-800/50">
@@ -507,7 +690,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                 </div>
               </div>
 
-              {/* THIRD ROW: Safety Information | Inspection History (2 Cols, 50/50) */}
+              {/* THIRD ROW: Safety Information | Inspections & Crashes (MODIFIED UI) */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col gap-6 shadow-2xl relative">
                   <div className="flex items-center justify-between">
@@ -574,7 +757,7 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   )}
                 </div>
 
-                {/* MODIFIED: Inspection History Section - Emerald Theme & SearchCarriers UI */}
+                {/* MODIFIED COMPONENT: Inspections & Crashes Section */}
                 <div className="bg-slate-850/40 p-8 rounded-[2rem] border border-slate-800 flex flex-col shadow-2xl">
                   <div className="flex items-center gap-3 mb-6">
                     <Activity size={20} className="text-emerald-400" />
@@ -630,7 +813,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                             </div>
                           </button>
 
-                          {/* Expanded Quick View with More Details Button */}
                           {expandedInspectionId === i && (
                             <div className="bg-slate-900/40 p-4 rounded-xl border border-emerald-500/20 space-y-3 animate-in slide-in-from-top-2 duration-200">
                               <div className="grid grid-cols-2 gap-2 text-[10px]">
@@ -673,24 +855,19 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
         </div>
       )}
 
-      {/* Violation Detail Modal Card */}
+      {/* MODIFIED: Violation Detail Modal (required for the 'More Details' button logic) */}
       {selectedViolationDetail && (
         <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-slate-900 border-2 border-emerald-500/30 w-full max-w-2xl max-h-[90vh] rounded-[2rem] shadow-2xl overflow-hidden flex flex-col animate-in zoom-in duration-300">
-            
             <div className="p-6 border-b border-emerald-500/20 bg-gradient-to-r from-slate-900 to-slate-850 flex justify-between items-center">
               <div>
                 <h3 className="text-lg font-black text-white uppercase tracking-tight mb-1">Inspection Report Details</h3>
                 <p className="text-[10px] text-slate-400 font-mono">Report #{selectedViolationDetail.reportNumber}</p>
               </div>
-              <button
-                onClick={() => setSelectedViolationDetail(null)}
-                className="p-2 text-slate-500 hover:text-white hover:bg-slate-800 rounded-xl transition-all active:scale-75"
-              >
+              <button onClick={() => setSelectedViolationDetail(null)} className="p-2 text-slate-500 hover:text-white hover:bg-slate-800 rounded-xl transition-all active:scale-75">
                 <X size={24} />
               </button>
             </div>
-
             <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-slate-850/60 p-4 rounded-xl border border-emerald-500/20">
@@ -702,26 +879,24 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                   <span className="text-base font-black text-white">{selectedViolationDetail.location}</span>
                 </div>
               </div>
-
               <div className="grid grid-cols-4 gap-3">
                 <div className="bg-slate-900/50 p-3 rounded-xl border border-emerald-500/20 flex flex-col items-center">
-                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">OOS Violations:</span>
+                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">OOS:</span>
                   <span className="text-xl font-black text-emerald-400">{selectedViolationDetail.oosViolations || 0}</span>
                 </div>
                 <div className="bg-slate-900/50 p-3 rounded-xl border border-emerald-500/20 flex flex-col items-center">
-                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Driver Violations:</span>
+                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Driver:</span>
                   <span className="text-xl font-black text-emerald-400">{selectedViolationDetail.driverViolations || 0}</span>
                 </div>
                 <div className="bg-slate-900/50 p-3 rounded-xl border border-emerald-500/20 flex flex-col items-center">
-                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Vehicle Violations:</span>
+                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Vehicle:</span>
                   <span className="text-xl font-black text-emerald-400">{selectedViolationDetail.vehicleViolations || 0}</span>
                 </div>
                 <div className="bg-slate-900/50 p-3 rounded-xl border border-emerald-500/20 flex flex-col items-center">
-                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Hazmat Violations:</span>
+                  <span className="text-[9px] text-slate-500 font-black uppercase mb-2">Hazmat:</span>
                   <span className="text-xl font-black text-emerald-400">{selectedViolationDetail.hazmatViolations || 0}</span>
                 </div>
               </div>
-
               <div>
                 <h4 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-4">Violation List</h4>
                 <div className="space-y-3">
@@ -733,18 +908,14 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
                       </div>
                       <p className="text-sm text-slate-300 leading-relaxed">{v.description}</p>
                     </div>
-                  ))}
+                  )) || (
+                    <p className="text-xs italic text-slate-600">No specific violation details found for this report.</p>
+                  )}
                 </div>
               </div>
             </div>
-
             <div className="p-6 bg-slate-950/70 border-t border-emerald-500/20 flex justify-end">
-              <button
-                onClick={() => setSelectedViolationDetail(null)}
-                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-bold transition-all active:scale-95"
-              >
-                Close
-              </button>
+              <button onClick={() => setSelectedViolationDetail(null)} className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-bold transition-all active:scale-95">Close</button>
             </div>
           </div>
         </div>
