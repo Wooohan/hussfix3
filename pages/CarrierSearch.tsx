@@ -926,9 +926,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
             {/* MODIFIED FOOTER: Reduced height to ~25% (p-4 instead of p-8) */}
             <div className="p-4 md:p-5 bg-slate-950/85 border-t border-slate-800 flex justify-end gap-4 items-center">
               <button onClick={() => setSelectedDot(null)} className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold border border-slate-700 active:scale-95 transition-all">Close View</button>
-              <button className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-black shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-2 active:scale-95 transition-all group">
-                <Download size={18} className="group-hover:-translate-y-0.5 transition-transform" /> Download Intel Report
-              </button>
             </div>
           </div>
         </div>
