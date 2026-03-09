@@ -49,25 +49,22 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
     isRunningRef.current = true;
     setStats({ total: targetList.length, insFound: 0, insFailed: 0, dbSaved: 0 });
     
-    setLogs(prev => [...prev, `🚀 ENGINE INITIALIZED: Extraction Phase Started...`]);
+    setLogs(prev => [...prev, `🚀 ENGINE INITIALIZED: Insurance Enrichment...`]);
     setLogs(prev => [...prev, `🔍 Targeting: ${targetList.length} USDOT records`]);
     
     const updatedCarriers = [...carriers]; 
-    const resultsBuffer: { dot: string; policies: InsurancePolicy[] }[] = [];
     let currentInsFound = 0;
     let currentInsFailed = 0;
+    let currentDbSaved = 0;
 
-    // --- PHASE 1: SCRAPING/EXTRACTION ---
     for (let i = 0; i < targetList.length; i++) {
-      if (!isRunningRef.current) {
-        setLogs(prev => [...prev, `🛑 Stop requested. Jumping to Sync phase for collected data...`]);
-        break;
-      }
+      if (!isRunningRef.current) break;
 
       const dot = targetList[i].dotNumber;
-      setLogs(prev => [...prev, `⏳ [SCRAPE] [${i+1}/${targetList.length}] Querying DOT: ${dot}...`]);
+      setLogs(prev => [...prev, `⏳ [INSURANCE] [${i+1}/${targetList.length}] Querying DOT: ${dot}...`]);
       
       try {
+        // 1. EXTRACTION
         const { policies } = await fetchInsuranceData(dot);
         
         const indexInFullList = updatedCarriers.findIndex(c => c.dotNumber === dot);
@@ -77,9 +74,18 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
 
         if (policies.length > 0) {
           currentInsFound++;
-          // Store in buffer for later saving
-          resultsBuffer.push({ dot, policies });
-          setLogs(prev => [...prev, `✨ Extracted ${policies.length} policies for ${dot} (Pending Sync)`]);
+          setLogs(prev => [...prev, `✨ Success: Extracted ${policies.length} insurance filings for ${dot}`]);
+          
+          // 2. IMMEDIATE SYNC (Only if data found)
+          try {
+            const res = await updateCarrierInsurance(dot, { policies });
+            if (res) {
+              currentDbSaved++;
+              setLogs(prev => [...prev, `✅ DB Sync: Record ${dot} updated successfully`]);
+            }
+          } catch (syncErr) {
+            setLogs(prev => [...prev, `❌ DB Fail: Could not sync ${dot}`]);
+          }
         } else {
           setLogs(prev => [...prev, `⚠️ Info: No active insurance found for ${dot}`]);
         }
@@ -88,36 +94,26 @@ export const InsuranceScraper: React.FC<InsuranceScraperProps> = ({ carriers, on
         setLogs(prev => [...prev, `❌ Fail: Insurance timeout for DOT ${dot}`]);
       }
 
+      // Update UI Counters
       setProgress(Math.round(((i + 1) / targetList.length) * 100));
-      setStats(prev => ({ ...prev, insFound: currentInsFound, insFailed: currentInsFailed }));
+      setStats(prev => ({ 
+        ...prev, 
+        insFound: currentInsFound, 
+        insFailed: currentInsFailed, 
+        dbSaved: currentDbSaved 
+      }));
       
+      if ((i + 1) % 3 === 0 || (i + 1) === targetList.length) {
+          onUpdateCarriers([...updatedCarriers]);
+      }
+
+      // Throttle for API stability
       await new Promise(r => setTimeout(r, 1000));
     }
 
-    // --- PHASE 2: DATABASE SYNCING ---
-    if (resultsBuffer.length > 0) {
-      setLogs(prev => [...prev, `📡 EXTRACTION COMPLETE. Starting DB Sync for ${resultsBuffer.length} records...`]);
-      let currentDbSaved = 0;
-
-      for (const item of resultsBuffer) {
-        try {
-          const res = await updateCarrierInsurance(item.dot, { policies: item.policies });
-          if (res) {
-            currentDbSaved++;
-            setLogs(prev => [...prev, `✅ DB Sync: ${item.dot} updated successfully`]);
-          }
-        } catch (syncErr) {
-          setLogs(prev => [...prev, `❌ DB Fail: Could not sync ${item.dot}`]);
-        }
-        setStats(prev => ({ ...prev, dbSaved: currentDbSaved }));
-      }
-    }
-
-    // Final UI Update
-    onUpdateCarriers([...updatedCarriers]);
     setIsProcessing(false);
     isRunningRef.current = false;
-    setLogs(prev => [...prev, `🎉 ENRICHMENT COMPLETE. All buffered data synchronized.`]);
+    setLogs(prev => [...prev, `🎉 ENRICHMENT COMPLETE. Database fully synchronized.`]);
   };
 
   const handleRangeRun = () => {
