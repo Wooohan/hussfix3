@@ -923,12 +923,6 @@ export const CarrierSearch: React.FC<CarrierSearchProps> = ({ carriers, onSearch
 
             </div>
 
-            {/* FOOTER: Removed download button, updated padding */}
-            <div className="p-4 md:p-5 bg-slate-950/85 border-t border-slate-800 flex justify-end items-center">
-              <button onClick={() => setSelectedDot(null)} className="px-8 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-sm font-bold border border-slate-700 active:scale-95 transition-all">
-                Close View
-              </button>
-            </div>
           </div>
         </div>
       )}
