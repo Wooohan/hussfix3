@@ -348,6 +348,83 @@ export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): P
       });
     }
 
+    // Post-fetch filtering for Safety Metrics (OOS Violations, Crashes, Injuries, Inspections)
+    // These are stored in JSONB columns and need to be filtered client-side
+    if (
+      filters.oosMin !== undefined || filters.oosMax !== undefined ||
+      filters.crashesMin !== undefined || filters.crashesMax !== undefined ||
+      filters.injuriesMin !== undefined || filters.injuriesMax !== undefined ||
+      filters.fatalitiesMin !== undefined || filters.fatalitiesMax !== undefined ||
+      filters.towawayMin !== undefined || filters.towawayMax !== undefined ||
+      filters.inspectionsMin !== undefined || filters.inspectionsMax !== undefined
+    ) {
+      results = results.filter(carrier => {
+        // Count OOS Violations from inspections
+        if (filters.oosMin !== undefined || filters.oosMax !== undefined) {
+          let oosCount = 0;
+          if (carrier.inspections && Array.isArray(carrier.inspections)) {
+            oosCount = carrier.inspections.reduce((sum, inspection) => sum + (inspection.oosViolations || 0), 0);
+          }
+          if (filters.oosMin !== undefined && oosCount < filters.oosMin) return false;
+          if (filters.oosMax !== undefined && oosCount > filters.oosMax) return false;
+        }
+
+        // Count total crashes
+        if (filters.crashesMin !== undefined || filters.crashesMax !== undefined) {
+          const crashCount = (carrier.crashes && Array.isArray(carrier.crashes)) ? carrier.crashes.length : 0;
+          if (filters.crashesMin !== undefined && crashCount < filters.crashesMin) return false;
+          if (filters.crashesMax !== undefined && crashCount > filters.crashesMax) return false;
+        }
+
+        // Count total injuries from crashes
+        if (filters.injuriesMin !== undefined || filters.injuriesMax !== undefined) {
+          let injuryCount = 0;
+          if (carrier.crashes && Array.isArray(carrier.crashes)) {
+            injuryCount = carrier.crashes.reduce((sum, crash) => {
+              const injuries = parseInt(crash.injuries || '0');
+              return sum + (isNaN(injuries) ? 0 : injuries);
+            }, 0);
+          }
+          if (filters.injuriesMin !== undefined && injuryCount < filters.injuriesMin) return false;
+          if (filters.injuriesMax !== undefined && injuryCount > filters.injuriesMax) return false;
+        }
+
+        // Count total fatalities from crashes
+        if (filters.fatalitiesMin !== undefined || filters.fatalitiesMax !== undefined) {
+          let fatalityCount = 0;
+          if (carrier.crashes && Array.isArray(carrier.crashes)) {
+            fatalityCount = carrier.crashes.reduce((sum, crash) => {
+              const fatals = parseInt(crash.fatal || '0');
+              return sum + (isNaN(fatals) ? 0 : fatals);
+            }, 0);
+          }
+          if (filters.fatalitiesMin !== undefined && fatalityCount < filters.fatalitiesMin) return false;
+          if (filters.fatalitiesMax !== undefined && fatalityCount > filters.fatalitiesMax) return false;
+        }
+
+        // Count total towaways (vehicles towed) - typically from crash data
+        if (filters.towawayMin !== undefined || filters.towawayMax !== undefined) {
+          let towawayCount = 0;
+          if (carrier.crashes && Array.isArray(carrier.crashes)) {
+            // Assuming towaways are a subset of crashes or marked in crash data
+            // If not explicitly marked, we count crashes as potential towaways
+            towawayCount = carrier.crashes.length;
+          }
+          if (filters.towawayMin !== undefined && towawayCount < filters.towawayMin) return false;
+          if (filters.towawayMax !== undefined && towawayCount > filters.towawayMax) return false;
+        }
+
+        // Count total inspections
+        if (filters.inspectionsMin !== undefined || filters.inspectionsMax !== undefined) {
+          const inspectionCount = (carrier.inspections && Array.isArray(carrier.inspections)) ? carrier.inspections.length : 0;
+          if (filters.inspectionsMin !== undefined && inspectionCount < filters.inspectionsMin) return false;
+          if (filters.inspectionsMax !== undefined && inspectionCount > filters.inspectionsMax) return false;
+        }
+
+        return true;
+      });
+    }
+
     return results;
   } catch (err) {
     console.error('❌ Exception fetching from Supabase:', err);
