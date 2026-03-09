@@ -189,6 +189,47 @@ export interface CarrierFilters {
   limit?: number;
 }
 
+/**
+ * Helper function to extract numeric value from JSONB array
+ * Handles various data formats that might be stored in the database
+ */
+const extractNumericValue = (value: any): number | null => {
+  if (value === null || value === undefined) return null;
+  
+  // If it's already a number, return it
+  if (typeof value === 'number') return value;
+  
+  // If it's a string, try to parse it
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    return isNaN(parsed) ? null : parsed;
+  }
+  
+  // If it's an object with a 'value' or 'rate' property
+  if (typeof value === 'object') {
+    if ('value' in value) return extractNumericValue(value.value);
+    if ('rate' in value) return extractNumericValue(value.rate);
+    if ('count' in value) return extractNumericValue(value.count);
+  }
+  
+  return null;
+};
+
+/**
+ * Helper function to get the first numeric value from JSONB array
+ * Returns the first valid numeric value found in the array
+ */
+const getFirstNumericValue = (arr: any[]): number | null => {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  
+  for (const item of arr) {
+    const value = extractNumericValue(item);
+    if (value !== null) return value;
+  }
+  
+  return null;
+};
+
 export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): Promise<any[]> => {
   try {
     let query = supabase
@@ -328,7 +369,8 @@ export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): P
       crashes: record.crashes,
     }));
 
-    // Post-fetch filtering for Years in Business (since mcs150_date is a string in various formats)
+    // ── Post-fetch filtering for Years in Business ──────────────────────────
+    // (since mcs150_date is a string in various formats)
     if (filters.yearsInBusinessMin !== undefined || filters.yearsInBusinessMax !== undefined) {
       results = results.filter(carrier => {
         if (!carrier.mcs150Date || carrier.mcs150Date === 'N/A') return false;
@@ -345,6 +387,138 @@ export const fetchCarriersFromSupabase = async (filters: CarrierFilters = {}): P
         } catch (e) {
           return false;
         }
+      });
+    }
+
+    // ── Post-fetch filtering for Safety Metrics ────────────────────────────
+    // These are filtered after fetching because they are stored in JSONB format
+    // and require complex parsing logic
+    if (
+      filters.oosMin !== undefined || filters.oosMax !== undefined ||
+      filters.crashesMin !== undefined || filters.crashesMax !== undefined ||
+      filters.injuriesMin !== undefined || filters.injuriesMax !== undefined ||
+      filters.fatalitiesMin !== undefined || filters.fatalitiesMax !== undefined ||
+      filters.towawayMin !== undefined || filters.towawayMax !== undefined ||
+      filters.inspectionsMin !== undefined || filters.inspectionsMax !== undefined
+    ) {
+      results = results.filter(carrier => {
+        // ── OOS Violations Filter ──
+        if (filters.oosMin !== undefined || filters.oosMax !== undefined) {
+          const oosValue = getFirstNumericValue(carrier.oosRates || []);
+          
+          // If no valid OOS value found and filter is set, exclude this carrier
+          if (oosValue === null) {
+            if (filters.oosMin !== undefined || filters.oosMax !== undefined) {
+              return false;
+            }
+          } else {
+            if (filters.oosMin !== undefined && oosValue < filters.oosMin) return false;
+            if (filters.oosMax !== undefined && oosValue > filters.oosMax) return false;
+          }
+        }
+
+        // ── Crashes Filter ──
+        if (filters.crashesMin !== undefined || filters.crashesMax !== undefined) {
+          const crashesValue = getFirstNumericValue(carrier.crashes || []);
+          
+          if (crashesValue === null) {
+            if (filters.crashesMin !== undefined || filters.crashesMax !== undefined) {
+              return false;
+            }
+          } else {
+            if (filters.crashesMin !== undefined && crashesValue < filters.crashesMin) return false;
+            if (filters.crashesMax !== undefined && crashesValue > filters.crashesMax) return false;
+          }
+        }
+
+        // ── Injuries Filter ──
+        // Note: Injuries data might be in basic_scores or a separate field
+        if (filters.injuriesMin !== undefined || filters.injuriesMax !== undefined) {
+          let injuriesValue: number | null = null;
+          
+          // Try to extract from basic_scores first
+          if (carrier.basicScores && Array.isArray(carrier.basicScores)) {
+            for (const score of carrier.basicScores) {
+              if (score && typeof score === 'object' && 'injuries' in score) {
+                injuriesValue = extractNumericValue(score.injuries);
+                if (injuriesValue !== null) break;
+              }
+            }
+          }
+          
+          if (injuriesValue === null) {
+            if (filters.injuriesMin !== undefined || filters.injuriesMax !== undefined) {
+              return false;
+            }
+          } else {
+            if (filters.injuriesMin !== undefined && injuriesValue < filters.injuriesMin) return false;
+            if (filters.injuriesMax !== undefined && injuriesValue > filters.injuriesMax) return false;
+          }
+        }
+
+        // ── Fatalities Filter ──
+        if (filters.fatalitiesMin !== undefined || filters.fatalitiesMax !== undefined) {
+          let fatalitiesValue: number | null = null;
+          
+          // Try to extract from basic_scores
+          if (carrier.basicScores && Array.isArray(carrier.basicScores)) {
+            for (const score of carrier.basicScores) {
+              if (score && typeof score === 'object' && 'fatalities' in score) {
+                fatalitiesValue = extractNumericValue(score.fatalities);
+                if (fatalitiesValue !== null) break;
+              }
+            }
+          }
+          
+          if (fatalitiesValue === null) {
+            if (filters.fatalitiesMin !== undefined || filters.fatalitiesMax !== undefined) {
+              return false;
+            }
+          } else {
+            if (filters.fatalitiesMin !== undefined && fatalitiesValue < filters.fatalitiesMin) return false;
+            if (filters.fatalitiesMax !== undefined && fatalitiesValue > filters.fatalitiesMax) return false;
+          }
+        }
+
+        // ── Towaway Filter ──
+        if (filters.towawayMin !== undefined || filters.towawayMax !== undefined) {
+          let towawayValue: number | null = null;
+          
+          // Try to extract from basic_scores or crashes
+          if (carrier.basicScores && Array.isArray(carrier.basicScores)) {
+            for (const score of carrier.basicScores) {
+              if (score && typeof score === 'object' && 'towaway' in score) {
+                towawayValue = extractNumericValue(score.towaway);
+                if (towawayValue !== null) break;
+              }
+            }
+          }
+          
+          if (towawayValue === null) {
+            if (filters.towawayMin !== undefined || filters.towawayMax !== undefined) {
+              return false;
+            }
+          } else {
+            if (filters.towawayMin !== undefined && towawayValue < filters.towawayMin) return false;
+            if (filters.towawayMax !== undefined && towawayValue > filters.towawayMax) return false;
+          }
+        }
+
+        // ── Inspections Filter ──
+        if (filters.inspectionsMin !== undefined || filters.inspectionsMax !== undefined) {
+          const inspectionsValue = getFirstNumericValue(carrier.inspections || []);
+          
+          if (inspectionsValue === null) {
+            if (filters.inspectionsMin !== undefined || filters.inspectionsMax !== undefined) {
+              return false;
+            }
+          } else {
+            if (filters.inspectionsMin !== undefined && inspectionsValue < filters.inspectionsMin) return false;
+            if (filters.inspectionsMax !== undefined && inspectionsValue > filters.inspectionsMax) return false;
+          }
+        }
+
+        return true;
       });
     }
 
