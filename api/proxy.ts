@@ -2,7 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const ALLOWED_DOMAINS = [
   'safer.fmcsa.dot.gov',
-  'ai.fmcsa.dot.gov'
+  'ai.fmcsa.dot.gov',
+  'searchcarriers.com'
 ];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -27,8 +28,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     });
 
+    const contentType = response.headers.get('content-type') || '';
     const text = await response.text();
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    
+    res.setHeader('Content-Type', contentType || 'text/html; charset=utf-8');
     res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(response.status).send(text);
 
