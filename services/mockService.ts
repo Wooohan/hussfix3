@@ -274,7 +274,7 @@ const any = (str: string, terms: string[]) => terms.some(t => str.includes(t));
 
 // ============================================================
 // INSURANCE DATA — exported for InsuranceScraper
-// hits searchcarriers.com API directly (no FMCSA, no proxy needed)
+// hits searchcarriers.com API via server-side proxy
 // ============================================================
 export const fetchInsuranceData = async (dot: string): Promise<{
   policies: InsurancePolicy[];
@@ -282,16 +282,19 @@ export const fetchInsuranceData = async (dot: string): Promise<{
 }> => {
   if (!dot) return { policies: [], raw: null };
 
-  // searchcarriers.com is a public API — no proxy needed, no CORS issues
+  const targetUrl = `https://searchcarriers.com/company/${dot}/insurances`;
+  const proxyUrl = `${BASE_URL}/api/proxy?url=${encodeURIComponent(targetUrl)}`;
+
   let result: any = null;
   try {
-    const res = await fetch(`https://searchcarriers.com/company/${dot}/insurances`, {
+    const res = await fetch(proxyUrl, {
       signal: AbortSignal.timeout(10000)
     });
     if (res.ok) {
       result = await res.json();
     }
   } catch (e) {
+    console.error('Insurance fetch error:', e);
     return { policies: [], raw: null };
   }
 
