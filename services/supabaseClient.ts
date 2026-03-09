@@ -173,18 +173,18 @@ export interface CarrierFilters {
   cargoOnFile?: string;      // '1' | '0' | ''
   bondOnFile?: string;       // '1' | '0' | ''
   // Safety
-  oosMin?: string;
-  oosMax?: string;
-  crashesMin?: string;
-  crashesMax?: string;
-  injuriesMin?: string;
-  injuriesMax?: string;
-  fatalitiesMin?: string;
-  fatalitiesMax?: string;
-  towawayMin?: string;
-  towawayMax?: string;
-  inspectionsMin?: string;
-  inspectionsMax?: string;
+  oosMin?: number;
+  oosMax?: number;
+  crashesMin?: number;
+  crashesMax?: number;
+  injuriesMin?: number;
+  injuriesMax?: number;
+  fatalitiesMin?: number;
+  fatalitiesMax?: number;
+  towawayMin?: number;
+  towawayMax?: number;
+  inspectionsMin?: number;
+  inspectionsMax?: number;
   // Pagination
   limit?: number;
 }
