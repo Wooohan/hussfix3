@@ -83,6 +83,13 @@ export const FMCSARegister: React.FC = () => {
         body: JSON.stringify({ date: selectedDate })
       });
       
+      // Handle non-JSON responses (e.g., Vercel 404 HTML page)
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+        throw new Error(`Server returned non-JSON response (${response.status}). The API endpoint may not be deployed yet. Response: ${text.substring(0, 100)}`);
+      }
+      
       const data = await response.json();
       
       if (!response.ok || !data.success) {
