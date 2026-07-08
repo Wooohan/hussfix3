@@ -12,6 +12,108 @@ interface FMCSAPublicationEntry {
   category: string;
 }
 
+// The new API returns entries in this format from the rewritten parser
+interface APIEntry {
+  category_label?: string;
+  usdot_number: string;
+  record_details?: string;
+  // Legacy fields (in case old format is returned)
+  legal_business_name?: string;
+  filing_date?: string;
+  mailing_address?: string;
+  company_officer?: string;
+  telephone?: string;
+  category?: string;
+}
+
+/**
+ * Convert new API format (category_label, usdot_number, record_details)
+ * into the display format expected by the table.
+ */
+function normalizeEntry(raw: APIEntry): FMCSAPublicationEntry {
+  // If it already has the legacy fields, use them directly
+  if (raw.legal_business_name && raw.category) {
+    return {
+      usdot_number: raw.usdot_number || '',
+      legal_business_name: raw.legal_business_name || '',
+      filing_date: raw.filing_date || '',
+      mailing_address: raw.mailing_address || '',
+      company_officer: raw.company_officer || '',
+      telephone: raw.telephone || '',
+      category: raw.category || '',
+    };
+  }
+
+  // New format: parse record_details into structured fields
+  const details = raw.record_details || '';
+  const parts = details.split(' | ').map(p => p.trim());
+
+  // Attempt to extract fields from record_details
+  // Typical format: "BUSINESS NAME  DATE  ADDRESS  OFFICER  PHONE"
+  // Parts are separated by " | " from multi-line grouping
+  let businessName = '';
+  let filingDate = '';
+  let mailingAddress = '';
+  let officer = '';
+  let phone = '';
+
+  if (parts.length > 0) {
+    // First part usually contains: business name, date, address, officer, phone
+    // Try to parse the first part by splitting on multiple spaces
+    const firstPart = parts[0];
+    const tokens = firstPart.split(/\s{2,}/).map(t => t.trim()).filter(t => t.length > 0);
+
+    // Look for a date pattern (MM/DD/YYYY)
+    const dateIdx = tokens.findIndex(t => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t));
+    // Look for a phone pattern
+    const phoneIdx = tokens.findIndex(t => /\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/.test(t));
+
+    if (dateIdx >= 0) {
+      businessName = tokens.slice(0, dateIdx).join(' ');
+      filingDate = tokens[dateIdx];
+      
+      if (phoneIdx >= 0 && phoneIdx > dateIdx) {
+        phone = tokens[phoneIdx];
+        mailingAddress = tokens.slice(dateIdx + 1, phoneIdx > dateIdx + 2 ? phoneIdx - 1 : phoneIdx).join(' ');
+        officer = phoneIdx > dateIdx + 2 ? tokens[phoneIdx - 1] : '';
+      } else {
+        // No phone found
+        const remaining = tokens.slice(dateIdx + 1);
+        if (remaining.length >= 2) {
+          mailingAddress = remaining.slice(0, -1).join(' ');
+          officer = remaining[remaining.length - 1];
+        } else if (remaining.length === 1) {
+          mailingAddress = remaining[0];
+        }
+      }
+    } else {
+      // No date found, use first token as business name
+      businessName = tokens[0] || '';
+      if (tokens.length > 1) mailingAddress = tokens.slice(1).join(' ');
+    }
+
+    // If there are additional parts from multi-line grouping, append to address
+    if (parts.length > 1) {
+      const extraInfo = parts.slice(1).join(' ');
+      if (!mailingAddress) {
+        mailingAddress = extraInfo;
+      } else {
+        mailingAddress += ' ' + extraInfo;
+      }
+    }
+  }
+
+  return {
+    usdot_number: raw.usdot_number || '',
+    legal_business_name: businessName || 'N/A',
+    filing_date: filingDate || 'N/A',
+    mailing_address: mailingAddress || 'N/A',
+    company_officer: officer || 'N/A',
+    telephone: phone || 'N/A',
+    category: raw.category_label || raw.category || 'Unknown',
+  };
+}
+
 export const FMCSARegister: React.FC = () => {
   const [publicationData, setPublicationData] = useState<FMCSAPublicationEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -29,12 +131,14 @@ export const FMCSARegister: React.FC = () => {
   const categories = [
     'BROKER OF HOUSEHOLD GOODS',
     'BROKER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)',
+    'ENTERPRISE MOTOR CARRIER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)',
     'FREIGHT FORWARDER OF HOUSEHOLD GOODS',
     'FREIGHT FORWARDER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)',
     'MOTOR CARRIER OF HOUSEHOLD GOODS',
-    'MOTOR CARRIER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)',
     'MOTOR CARRIER OF PASSENGERS',
-    'FITNESS-ONLY APPLICATIONS'
+    'MOTOR CARRIER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)',
+    'FITNESS-ONLY APPLICATIONS',
+    'UNKNOWN / GENERAL'
   ];
 
   function getTodayDate(): string {
@@ -100,12 +204,14 @@ export const FMCSARegister: React.FC = () => {
       }
       
       if (data.entries && data.entries.length > 0) {
-        setPublicationData(data.entries);
+        // Normalize entries from new API format to display format
+        const normalized = data.entries.map((entry: APIEntry) => normalizeEntry(entry));
+        setPublicationData(normalized);
         setPdfUrl(data.pdf_url || '');
         setLastUpdated(`✅ Fetched ${data.count} records from Daily FMCSA Publications (${new Date().toLocaleTimeString()})`);
         
         // Save to Supabase for future reference
-        savePublicationsToSupabase(data.entries, selectedDate);
+        savePublicationsToSupabase(normalized, selectedDate);
         loadAvailableDates();
       } else {
         throw new Error('No entries found in the PDF for this date.');
@@ -192,11 +298,12 @@ export const FMCSARegister: React.FC = () => {
   // Filter data based on category and search term
   const filteredData = publicationData.filter(entry => {
     const matchesCategory = selectedCategory === 'all' || entry.category === selectedCategory;
-    const matchesSearch = 
-      entry.legal_business_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      entry.usdot_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry.mailing_address.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry.company_officer.toLowerCase().includes(searchTerm.toLowerCase());
+    const term = searchTerm.toLowerCase();
+    const matchesSearch = !term ||
+      (entry.legal_business_name || '').toLowerCase().includes(term) || 
+      (entry.usdot_number || '').toLowerCase().includes(term) ||
+      (entry.mailing_address || '').toLowerCase().includes(term) ||
+      (entry.company_officer || '').toLowerCase().includes(term);
     return matchesCategory && matchesSearch;
   });
 
@@ -208,13 +315,13 @@ export const FMCSARegister: React.FC = () => {
     const csvContent = [
       headers.join(','),
       ...filteredData.map(entry => [
-        `"${entry.category}"`,
-        `"${entry.usdot_number}"`,
-        `"${entry.legal_business_name}"`,
-        `"${entry.filing_date}"`,
-        `"${entry.mailing_address}"`,
-        `"${entry.company_officer}"`,
-        `"${entry.telephone}"`
+        `"${entry.category || ''}"`,
+        `"${entry.usdot_number || ''}"`,
+        `"${entry.legal_business_name || ''}"`,
+        `"${entry.filing_date || ''}"`,
+        `"${entry.mailing_address || ''}"`,
+        `"${entry.company_officer || ''}"`,
+        `"${entry.telephone || ''}"`
       ].join(','))
     ].join('\n');
 
@@ -226,17 +333,20 @@ export const FMCSARegister: React.FC = () => {
   };
 
   const getCategoryColor = (category: string) => {
-    const colors: Record<string, string> = {
-      'BROKER OF HOUSEHOLD GOODS': 'text-blue-400 border-blue-500/30 bg-blue-500/10',
-      'BROKER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)': 'text-cyan-400 border-cyan-500/30 bg-cyan-500/10',
-      'FREIGHT FORWARDER OF HOUSEHOLD GOODS': 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10',
-      'FREIGHT FORWARDER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)': 'text-teal-400 border-teal-500/30 bg-teal-500/10',
-      'MOTOR CARRIER OF HOUSEHOLD GOODS': 'text-purple-400 border-purple-500/30 bg-purple-500/10',
-      'MOTOR CARRIER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)': 'text-indigo-400 border-indigo-500/30 bg-indigo-500/10',
-      'MOTOR CARRIER OF PASSENGERS': 'text-amber-400 border-amber-500/30 bg-amber-500/10',
-      'FITNESS-ONLY APPLICATIONS': 'text-rose-400 border-rose-500/30 bg-rose-500/10',
-    };
-    return colors[category] || 'text-slate-400 border-slate-500/30 bg-slate-500/10';
+    if (!category) return 'text-slate-400 border-slate-500/30 bg-slate-500/10';
+    const upperCat = category.toUpperCase();
+    
+    if (upperCat.includes('BROKER') && upperCat.includes('HOUSEHOLD')) return 'text-blue-400 border-blue-500/30 bg-blue-500/10';
+    if (upperCat.includes('BROKER')) return 'text-cyan-400 border-cyan-500/30 bg-cyan-500/10';
+    if (upperCat.includes('FREIGHT') && upperCat.includes('HOUSEHOLD')) return 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10';
+    if (upperCat.includes('FREIGHT')) return 'text-teal-400 border-teal-500/30 bg-teal-500/10';
+    if (upperCat.includes('MOTOR') && upperCat.includes('HOUSEHOLD')) return 'text-purple-400 border-purple-500/30 bg-purple-500/10';
+    if (upperCat.includes('MOTOR') && upperCat.includes('PASSENGERS')) return 'text-amber-400 border-amber-500/30 bg-amber-500/10';
+    if (upperCat.includes('MOTOR') && upperCat.includes('ENTERPRISE')) return 'text-sky-400 border-sky-500/30 bg-sky-500/10';
+    if (upperCat.includes('MOTOR')) return 'text-indigo-400 border-indigo-500/30 bg-indigo-500/10';
+    if (upperCat.includes('FITNESS')) return 'text-rose-400 border-rose-500/30 bg-rose-500/10';
+    
+    return 'text-slate-400 border-slate-500/30 bg-slate-500/10';
   };
 
   return (
