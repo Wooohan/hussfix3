@@ -1,8 +1,11 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import axios from 'axios';
 
+// pdf-parse v1.1.1's index.js has debug code that tries to read a test PDF file
+// when module.parent is falsy (which happens in Vercel's serverless environment).
+// Import directly from the lib to bypass the problematic debug code.
 // @ts-ignore
-import pdf from 'pdf-parse';
+import pdfParseLib from 'pdf-parse/lib/pdf-parse.js';
 
 interface FMCSAEntry {
   usdot_number: string;
@@ -283,7 +286,7 @@ export default async (req: VercelRequest, res: VercelResponse) => {
     });
 
     const pdfBuffer = Buffer.from(pdfResponse.data);
-    const pdfData = await pdf(pdfBuffer);
+    const pdfData = await pdfParseLib(pdfBuffer);
     
     // Try both parsing strategies and use the one with more results
     const entries1 = parsePdfText(pdfData.text);
