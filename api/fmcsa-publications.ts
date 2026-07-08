@@ -1,8 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import axios from 'axios';
-import * as cheerio from 'cheerio';
 
-// We'll use pdf-parse for Node.js PDF text extraction
 // @ts-ignore
 import pdf from 'pdf-parse';
 
@@ -47,17 +45,13 @@ function parsePdfText(text: string): FMCSAEntry[] {
       }
     }
     
-    // Look for USDOT numbers (typically 7-digit numbers)
+    // Look for USDOT numbers (typically 5-8 digit numbers at start of line)
     const usdotMatch = lines[i].match(/^(\d{5,8})\s+(.+)/);
     if (usdotMatch) {
       const usdot = usdotMatch[1];
       const restOfLine = usdotMatch[2].trim();
       
-      // Try to parse the rest - format is typically:
-      // USDOT  Business Name  Date  Address  Officer  Phone
-      // But it might span multiple columns in the PDF text
-      
-      // Look for a date pattern (MM/DD/YYYY or similar)
+      // Look for a date pattern (MM/DD/YYYY)
       const dateMatch = restOfLine.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
       
       let businessName = '';
@@ -72,14 +66,13 @@ function parsePdfText(text: string): FMCSAEntry[] {
         filingDate = dateMatch[1];
         const afterDate = restOfLine.substring(dateIndex + dateMatch[1].length).trim();
         
-        // Try to extract phone number (last part, usually digits with dashes/parens)
+        // Try to extract phone number
         const phoneMatch = afterDate.match(/(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\s*$/);
         if (phoneMatch) {
           phone = phoneMatch[1];
           const beforePhone = afterDate.substring(0, afterDate.lastIndexOf(phoneMatch[1])).trim();
           
           // Split remaining into address and officer
-          // Officer is usually the last name-like segment before phone
           const parts = beforePhone.split(/\s{2,}/);
           if (parts.length >= 2) {
             address = parts.slice(0, -1).join(' ').trim();
@@ -89,7 +82,7 @@ function parsePdfText(text: string): FMCSAEntry[] {
           }
         } else {
           // No phone found, try to split by multiple spaces
-          const parts = afterDate.split(/\s{2,}/);
+          const parts = afterDate.split(/\s{2,}/).map(c => c.trim()).filter(c => c.length > 0);
           if (parts.length >= 3) {
             address = parts[0].trim();
             officer = parts[1].trim();
@@ -111,7 +104,7 @@ function parsePdfText(text: string): FMCSAEntry[] {
           const nextDateMatch = nextLine.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
           if (nextDateMatch) {
             filingDate = nextDateMatch[1];
-            i++; // Skip next line
+            i++;
           }
         }
       }
@@ -149,7 +142,7 @@ function parsePdfTextTabular(text: string): FMCSAEntry[] {
     
     // Check for category headers
     for (const cat of VALID_CATEGORIES) {
-      if (lineUpper === cat) {
+      if (lineUpper === cat || lineUpper.includes(cat)) {
         currentCategory = cat;
         inTable = false;
         break;
@@ -217,154 +210,68 @@ export default async (req: VercelRequest, res: VercelResponse) => {
       });
     }
 
-    console.log(`Fetching FMCSA Daily Publications for date: ${date}`);
-
-    // Step 1: Scrape the publications page to find the PDF link
-    const publicationsUrl = 'https://motus.dot.gov/customer/daily-fmcsa-publications';
-    
-    const pageResponse = await axios.get(publicationsUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-      timeout: 30000,
-    });
-
-    const $ = cheerio.load(pageResponse.data);
-    
-    const targetDate = new Date(date + 'T00:00:00Z');
-    const targetMonth = targetDate.getUTCMonth();
-    const targetDay = targetDate.getUTCDate();
-    const targetYear = targetDate.getUTCFullYear();
-    
-    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const monthShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    
-    // Build date patterns to search for
-    const mm = String(targetMonth + 1).padStart(2, '0');
-    const dd = String(targetDay).padStart(2, '0');
-    const yyyy = String(targetYear);
-    const yy = String(targetYear).slice(-2);
-    
-    const datePatterns = [
-      `${monthNames[targetMonth]} ${targetDay}, ${targetYear}`,
-      `${monthNames[targetMonth]} ${dd}, ${targetYear}`,
-      `${monthShort[targetMonth]} ${targetDay}, ${targetYear}`,
-      `${monthShort[targetMonth]} ${dd}, ${targetYear}`,
-      `${mm}/${dd}/${yyyy}`,
-      `${targetMonth + 1}/${targetDay}/${targetYear}`,
-      `${yyyy}-${mm}-${dd}`,
-      `${mm}-${dd}-${yyyy}`,
-    ];
-
-    let pdfUrl: string | null = null;
-
-    // Strategy 1: Look for links containing date in text/href
-    $('a[href]').each((_, el) => {
-      if (pdfUrl) return;
-      
-      const href = $(el).attr('href') || '';
-      const linkText = $(el).text().trim();
-      const parentText = $(el).parent().text().trim();
-      
-      const isPdfLink = href.toLowerCase().includes('.pdf') || 
-                        href.toLowerCase().includes('pdf') ||
-                        linkText.toLowerCase().includes('pdf') ||
-                        linkText.toLowerCase().includes('download');
-      
-      if (!isPdfLink) return;
-      
-      for (const pattern of datePatterns) {
-        if (linkText.includes(pattern) || parentText.includes(pattern) || href.includes(pattern.replace(/\//g, '-'))) {
-          pdfUrl = href;
-          return;
-        }
-      }
-      
-      // Check for date components in URL
-      const dateStr = `${yyyy}${mm}${dd}`;
-      const dateStr2 = `${mm}${dd}${yyyy}`;
-      const dateStr3 = `${mm}-${dd}-${yyyy}`;
-      const dateStr4 = `${yyyy}-${mm}-${dd}`;
-      const dateStr5 = `${mm}${dd}${yy}`;
-      
-      if (href.includes(dateStr) || href.includes(dateStr2) || href.includes(dateStr3) || href.includes(dateStr4) || href.includes(dateStr5)) {
-        pdfUrl = href;
-        return;
-      }
-    });
-
-    // Strategy 2: Look in elements containing the date text
-    if (!pdfUrl) {
-      $('tr, li, div, p, td, span').each((_, el) => {
-        if (pdfUrl) return;
-        const elementText = $(el).text();
-        
-        for (const pattern of datePatterns) {
-          if (elementText.includes(pattern)) {
-            const link = $(el).find('a[href*=".pdf"], a[href*="pdf"]').first();
-            if (link.length > 0) {
-              pdfUrl = link.attr('href') || null;
-              return;
-            }
-            // Check siblings and parent
-            const parentLink = $(el).closest('tr, li, div').find('a[href*=".pdf"], a[href*="pdf"]').first();
-            if (parentLink.length > 0) {
-              pdfUrl = parentLink.attr('href') || null;
-              return;
-            }
-          }
-        }
-      });
-    }
-
-    // Strategy 3: Check all links for date in URL path
-    if (!pdfUrl) {
-      $('a[href]').each((_, el) => {
-        if (pdfUrl) return;
-        const href = $(el).attr('href') || '';
-        
-        if (href.includes(`${mm}-${dd}-${yyyy}`) || 
-            href.includes(`${mm}${dd}${yyyy}`) ||
-            href.includes(`${yyyy}-${mm}-${dd}`) ||
-            href.includes(`${mm}${dd}${yy}`) ||
-            href.includes(`${mm}-${dd}-${yy}`) ||
-            href.includes(`${dd}-${mm}-${yyyy}`)) {
-          pdfUrl = href;
-        }
-      });
-    }
-
-    if (!pdfUrl) {
-      const allLinks: string[] = [];
-      $('a[href]').each((_, el) => {
-        const href = $(el).attr('href') || '';
-        const text = $(el).text().trim().substring(0, 120);
-        if (href.toLowerCase().includes('pdf') || text.toLowerCase().includes('publication') || text.toLowerCase().includes('daily')) {
-          allLinks.push(`${text} -> ${href}`);
-        }
-      });
-
-      return res.status(404).json({
+    // Validate date format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return res.status(400).json({
         success: false,
-        error: `No PDF found for date ${date} on the publications page. The publication may not be available for this date yet.`,
-        hint: 'Try a recent weekday date. Publications are typically posted on business days.',
-        available_links: allLinks.slice(0, 25),
-        searched_patterns: datePatterns,
+        error: 'Invalid date format. Use YYYY-MM-DD',
         entries: []
       });
     }
 
-    // Make URL absolute
-    if (pdfUrl && !pdfUrl.startsWith('http')) {
-      if (pdfUrl.startsWith('/')) {
-        pdfUrl = `https://motus.dot.gov${pdfUrl}`;
-      } else {
-        pdfUrl = `https://motus.dot.gov/customer/${pdfUrl}`;
-      }
+    console.log(`Fetching FMCSA Daily Publications for date: ${date}`);
+
+    // Calculate the next day for the date range (API uses exclusive end date)
+    const fromDate = date; // YYYY-MM-DD
+    const nextDay = new Date(date + 'T00:00:00Z');
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    const toDate = nextDay.toISOString().split('T')[0]; // YYYY-MM-DD
+
+    // Step 1: Call the motus.dot.gov API directly to get signed PDF URLs
+    // API endpoint discovered: /api/report/getSignedUrlByTypeAndDateRange/{TYPE}/{FROM}/{TO}
+    // Types: REGISTER (FMCSA Daily Register), BROKER (Broker & Freight Forwarder notices)
+    const apiUrl = `https://motus.dot.gov/api/report/getSignedUrlByTypeAndDateRange/REGISTER/${fromDate}/${toDate}`;
+    
+    console.log(`Calling MOTUS API: ${apiUrl}`);
+
+    const apiResponse = await axios.get(apiUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://motus.dot.gov/customer/daily-fmcsa-publications',
+      },
+      timeout: 30000,
+    });
+
+    const apiData = apiResponse.data;
+    
+    // The API returns: { "Register": [{ "date": "YYYY-MM-DD", "url": "https://..." }] }
+    const registerEntries = apiData?.Register || apiData?.register || [];
+    
+    if (!registerEntries || registerEntries.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: `No FMCSA Daily Register publication found for date ${date}. The publication may not be available for this date (weekends/holidays typically have no publications).`,
+        hint: 'Try a recent weekday date. Publications are typically posted on business days.',
+        entries: []
+      });
     }
 
-    console.log(`Found PDF URL: ${pdfUrl}`);
+    // Find the entry matching our target date
+    const targetEntry = registerEntries.find((entry: any) => entry.date === fromDate) || registerEntries[0];
+    const pdfUrl = targetEntry?.url;
+
+    if (!pdfUrl) {
+      return res.status(404).json({
+        success: false,
+        error: `PDF URL not found for date ${date}`,
+        available_dates: registerEntries.map((e: any) => e.date),
+        entries: []
+      });
+    }
+
+    console.log(`Found PDF URL for ${targetEntry.date}, downloading...`);
 
     // Step 2: Download and parse the PDF
     const pdfResponse = await axios.get(pdfUrl, {
@@ -398,12 +305,33 @@ export default async (req: VercelRequest, res: VercelResponse) => {
       count: cleanEntries.length,
       date: date,
       pdf_url: pdfUrl,
+      pdf_date: targetEntry.date,
       lastUpdated: new Date().toISOString(),
       entries: cleanEntries
     });
 
   } catch (error: any) {
     console.error('FMCSA Publications error:', error.message);
+    
+    // Provide more specific error messages
+    if (error.response?.status === 404) {
+      return res.status(404).json({
+        success: false,
+        error: `No publication found for the requested date. The MOTUS API returned 404.`,
+        details: error.message,
+        entries: []
+      });
+    }
+    
+    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+      return res.status(504).json({
+        success: false,
+        error: 'Request timed out while fetching publication data. Please try again.',
+        details: error.message,
+        entries: []
+      });
+    }
+
     return res.status(500).json({
       success: false,
       error: 'Failed to fetch FMCSA publications data',
