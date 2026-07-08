@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/fmcsa-publications.ts": {
+      "maxDuration": 60
+    }
+  }
+}
