@@ -8,183 +8,109 @@ import axios from 'axios';
 import pdfParseLib from 'pdf-parse/lib/pdf-parse.js';
 
 interface FMCSAEntry {
+  category_label: string;
   usdot_number: string;
-  legal_business_name: string;
-  filing_date: string;
-  mailing_address: string;
-  company_officer: string;
-  telephone: string;
-  category: string;
+  record_details: string;
 }
 
-const VALID_CATEGORIES = [
+const TARGET_CATEGORIES = [
   "BROKER OF HOUSEHOLD GOODS",
   "BROKER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)",
+  "ENTERPRISE MOTOR CARRIER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)",
   "FREIGHT FORWARDER OF HOUSEHOLD GOODS",
   "FREIGHT FORWARDER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)",
   "MOTOR CARRIER OF HOUSEHOLD GOODS",
-  "MOTOR CARRIER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)",
   "MOTOR CARRIER OF PASSENGERS",
-  "FITNESS-ONLY APPLICATIONS"
+  "MOTOR CARRIER OF PROPERTY (EXCEPT HOUSEHOLD GOODS)",
 ];
 
 /**
- * Parse PDF text content into structured entries
+ * Parse PDF text content into structured entries.
+ * This mirrors the working Python pdfplumber-based parser logic:
+ * - Tracks current category label
+ * - Detects USDOT number lines (4-9 digit numbers at start)
+ * - Peeks ahead to group multi-line records
  */
 function parsePdfText(text: string): FMCSAEntry[] {
-  const entries: FMCSAEntry[] = [];
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  
-  let currentCategory = "Unknown Section";
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].toUpperCase().trim();
-    
-    // Check if this line is a category header
-    for (const cat of VALID_CATEGORIES) {
-      if (line === cat || line.includes(cat)) {
-        currentCategory = cat;
-        break;
-      }
-    }
-    
-    // Look for USDOT numbers (typically 5-8 digit numbers at start of line)
-    const usdotMatch = lines[i].match(/^(\d{5,8})\s+(.+)/);
-    if (usdotMatch) {
-      const usdot = usdotMatch[1];
-      const restOfLine = usdotMatch[2].trim();
-      
-      // Look for a date pattern (MM/DD/YYYY)
-      const dateMatch = restOfLine.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
-      
-      let businessName = '';
-      let filingDate = '';
-      let address = '';
-      let officer = '';
-      let phone = '';
-      
-      if (dateMatch) {
-        const dateIndex = restOfLine.indexOf(dateMatch[1]);
-        businessName = restOfLine.substring(0, dateIndex).trim();
-        filingDate = dateMatch[1];
-        const afterDate = restOfLine.substring(dateIndex + dateMatch[1].length).trim();
-        
-        // Try to extract phone number
-        const phoneMatch = afterDate.match(/(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\s*$/);
-        if (phoneMatch) {
-          phone = phoneMatch[1];
-          const beforePhone = afterDate.substring(0, afterDate.lastIndexOf(phoneMatch[1])).trim();
-          
-          // Split remaining into address and officer
-          const parts = beforePhone.split(/\s{2,}/);
-          if (parts.length >= 2) {
-            address = parts.slice(0, -1).join(' ').trim();
-            officer = parts[parts.length - 1].trim();
-          } else {
-            address = beforePhone;
-          }
-        } else {
-          // No phone found, try to split by multiple spaces
-          const parts = afterDate.split(/\s{2,}/).map(c => c.trim()).filter(c => c.length > 0);
-          if (parts.length >= 3) {
-            address = parts[0].trim();
-            officer = parts[1].trim();
-            phone = parts[2].trim();
-          } else if (parts.length === 2) {
-            address = parts[0].trim();
-            officer = parts[1].trim();
-          } else {
-            address = afterDate;
-          }
-        }
-      } else {
-        // No date found, just use the rest as business name
-        businessName = restOfLine;
-        
-        // Check next lines for more data
-        if (i + 1 < lines.length && !lines[i + 1].match(/^\d{5,8}/)) {
-          const nextLine = lines[i + 1];
-          const nextDateMatch = nextLine.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
-          if (nextDateMatch) {
-            filingDate = nextDateMatch[1];
-            i++;
-          }
-        }
-      }
-      
-      if (usdot && (businessName || filingDate)) {
-        entries.push({
-          usdot_number: usdot,
-          legal_business_name: businessName || 'N/A',
-          filing_date: filingDate || 'N/A',
-          mailing_address: address || 'N/A',
-          company_officer: officer || 'N/A',
-          telephone: phone || 'N/A',
-          category: currentCategory
-        });
-      }
-    }
-  }
-  
-  return entries;
-}
+  const data: FMCSAEntry[] = [];
+  let currentCategory = "UNKNOWN / GENERAL";
 
-/**
- * Alternative parsing: Try to find tabular data using column-based approach
- */
-function parsePdfTextTabular(text: string): FMCSAEntry[] {
-  const entries: FMCSAEntry[] = [];
   const lines = text.split('\n');
-  
-  let currentCategory = "Unknown Section";
-  let inTable = false;
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    const lineUpper = line.toUpperCase();
-    
-    // Check for category headers
-    for (const cat of VALID_CATEGORIES) {
-      if (lineUpper === cat || lineUpper.includes(cat)) {
-        currentCategory = cat;
-        inTable = false;
-        break;
-      }
-    }
-    
-    // Check for table header row
-    if (lineUpper.includes('USDOT') && lineUpper.includes('LEGAL BUSINESS')) {
-      inTable = true;
+  let lineIdx = 0;
+
+  while (lineIdx < lines.length) {
+    const line = lines[lineIdx].trim();
+
+    // Skip blank lines or structural running footers/headers
+    if (
+      !line ||
+      line.includes('Run Date') ||
+      line.includes('Run Time') ||
+      line.includes('Page') ||
+      line.includes('USDOT Number')
+    ) {
+      lineIdx++;
       continue;
     }
-    
-    if (!inTable) continue;
-    
-    // Skip empty lines and separator lines
-    if (!line || line.match(/^[-=]+$/)) continue;
-    
-    // Try to match a data row starting with USDOT number
-    const match = line.match(/^(\d{5,8})\s+(.+)/);
-    if (match) {
-      const usdot = match[1];
-      const rest = match[2];
-      
-      // Split by multiple spaces (column separator in PDF text)
-      const columns = rest.split(/\s{2,}/).map(c => c.trim()).filter(c => c.length > 0);
-      
-      entries.push({
-        usdot_number: usdot,
-        legal_business_name: columns[0] || 'N/A',
-        filing_date: columns[1] || 'N/A',
-        mailing_address: columns[2] || 'N/A',
-        company_officer: columns[3] || 'N/A',
-        telephone: columns[4] || 'N/A',
-        category: currentCategory
+
+    // --- 1. Detect Category Updates (Including Multi-Line Titles) ---
+    let matchedCategory: string | null = null;
+
+    // Check for a clean single-line category match
+    const singleLineMatch = TARGET_CATEGORIES.find(cat => line.includes(cat));
+    if (singleLineMatch) {
+      matchedCategory = singleLineMatch;
+    }
+    // Check if the title is split across the current line and the next line
+    else if (lineIdx + 1 < lines.length) {
+      const combinedLine = `${line} ${lines[lineIdx + 1].trim()}`;
+      const multiLineMatch = TARGET_CATEGORIES.find(cat => combinedLine.includes(cat));
+      if (multiLineMatch) {
+        matchedCategory = multiLineMatch;
+        lineIdx++; // Consume the next line too since it was part of the header
+      }
+    }
+
+    if (matchedCategory) {
+      currentCategory = matchedCategory;
+      lineIdx++;
+      continue;
+    }
+
+    // --- 2. Extract Data Rows ---
+    // Valid listing rows strictly start with a USDOT numerical identifier (4-9 digits)
+    if (/^\d{4,9}/.test(line)) {
+      const tokens = line.split(/\s+/);
+      const usdotNumber = tokens[0];
+      let remainingText = tokens.slice(1).join(' ');
+
+      // Peek ahead to group multi-line company descriptions belonging to this record
+      while (lineIdx + 1 < lines.length) {
+        const nextLine = lines[lineIdx + 1].trim();
+        // If the next line is empty, a footer, or a brand new record entry, break loop
+        if (
+          !nextLine ||
+          nextLine.includes('Run Date') ||
+          /^\d{4,9}/.test(nextLine) ||
+          TARGET_CATEGORIES.some(cat => nextLine.includes(cat))
+        ) {
+          break;
+        }
+        remainingText += ` | ${nextLine}`;
+        lineIdx++;
+      }
+
+      data.push({
+        category_label: currentCategory,
+        usdot_number: usdotNumber,
+        record_details: remainingText,
       });
     }
+
+    lineIdx++;
   }
-  
-  return entries;
+
+  return data;
 }
 
 export default async (req: VercelRequest, res: VercelResponse) => {
@@ -232,8 +158,6 @@ export default async (req: VercelRequest, res: VercelResponse) => {
     const toDate = nextDay.toISOString().split('T')[0]; // YYYY-MM-DD
 
     // Step 1: Call the motus.dot.gov API directly to get signed PDF URLs
-    // API endpoint discovered: /api/report/getSignedUrlByTypeAndDateRange/{TYPE}/{FROM}/{TO}
-    // Types: REGISTER (FMCSA Daily Register), BROKER (Broker & Freight Forwarder notices)
     const apiUrl = `https://motus.dot.gov/api/report/getSignedUrlByTypeAndDateRange/REGISTER/${fromDate}/${toDate}`;
     
     console.log(`Calling MOTUS API: ${apiUrl}`);
@@ -288,17 +212,15 @@ export default async (req: VercelRequest, res: VercelResponse) => {
     const pdfBuffer = Buffer.from(pdfResponse.data);
     const pdfData = await pdfParseLib(pdfBuffer);
     
-    // Try both parsing strategies and use the one with more results
-    const entries1 = parsePdfText(pdfData.text);
-    const entries2 = parsePdfTextTabular(pdfData.text);
-    
-    const entries = entries1.length >= entries2.length ? entries1 : entries2;
+    console.log(`PDF parsed, total text length: ${pdfData.text.length}, pages: ${pdfData.numpages}`);
 
-    // Filter out invalid entries
+    // Parse using the line-by-line approach matching the working Python logic
+    const entries = parsePdfText(pdfData.text);
+
+    // Filter out invalid entries (must have valid USDOT number)
     const cleanEntries = entries.filter(e => 
       e.usdot_number && 
-      e.usdot_number !== 'N/A' && 
-      e.usdot_number.match(/^\d+$/)
+      /^\d+$/.test(e.usdot_number)
     );
 
     console.log(`Parsed ${cleanEntries.length} entries from PDF`);
