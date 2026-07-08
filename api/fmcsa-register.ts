@@ -2,17 +2,18 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
-// Helper function to format date as DD-MMM-YY if user doesn't provide one
-function formatDateForFMCSA(date: Date): string {
-  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = months[date.getMonth()];
-  const year = String(date.getFullYear()).slice(-2);
-  return `${day}-${month}-${year}`;
-}
+/**
+ * NEW: Daily FMCSA Publications endpoint
+ * Scrapes https://motus.dot.gov/customer/daily-fmcsa-publications
+ * to find the PDF link for a given date, then returns the link.
+ * 
+ * Note: PDF parsing requires Python (pdfplumber) which isn't available on Vercel.
+ * For Vercel deployment, this endpoint returns the PDF URL for client-side handling.
+ * For full parsing, use the Express server (server/index.ts) which calls the Python script.
+ */
 
 export default async (req: VercelRequest, res: VercelResponse) => {
-  // 1. CORS Headers for Web App Safety
+  // CORS Headers
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
@@ -27,104 +28,163 @@ export default async (req: VercelRequest, res: VercelResponse) => {
   }
 
   try {
-    const { date } = req.body;
-    const registerDate = date || formatDateForFMCSA(new Date());
-    const registerUrl = 'https://li-public.fmcsa.dot.gov/LIVIEW/PKG_register.prc_reg_detail';
-    
-    // 2. Prepare Form Data
-    const params = new URLSearchParams();
-    params.append('pd_date', registerDate);
-    params.append('pv_vpath', 'LIVIEW');
+    const { date } = req.body; // Expected: YYYY-MM-DD
 
-    // 3. Fetch HTML with timeout safety
-    const response = await axios.post(registerUrl, params.toString(), {
+    if (!date) {
+      return res.status(400).json({
+        success: false,
+        error: 'Date is required (format: YYYY-MM-DD)',
+        entries: []
+      });
+    }
+
+    // Scrape the publications page to find the PDF link
+    const publicationsUrl = 'https://motus.dot.gov/customer/daily-fmcsa-publications';
+    
+    const pageResponse = await axios.get(publicationsUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       },
-      timeout: 30000, 
+      timeout: 30000,
     });
 
-    const $ = cheerio.load(response.data);
-    const allEntries: any[] = [];
-
-    // 4. Map Categories to their exact HTML Anchor Names
-    const categories = [
-      { name: 'NAME CHANGE', anchor: 'NC' },
-      { name: 'CERTIFICATE, PERMIT, LICENSE', anchor: 'CPL' },
-      { name: 'CERTIFICATE OF REGISTRATION', anchor: 'CX2' },
-      { name: 'DISMISSAL', anchor: 'DIS' },
-      { name: 'WITHDRAWAL', anchor: 'WDN' },
-      { name: 'REVOCATION', anchor: 'REV' }
+    const $ = cheerio.load(pageResponse.data);
+    
+    const targetDate = new Date(date + 'T00:00:00Z');
+    const targetMonth = targetDate.getUTCMonth();
+    const targetDay = targetDate.getUTCDate();
+    const targetYear = targetDate.getUTCFullYear();
+    
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    const datePatterns = [
+      `${monthNames[targetMonth]} ${targetDay}, ${targetYear}`,
+      `${monthNames[targetMonth]} ${String(targetDay).padStart(2, '0')}, ${targetYear}`,
+      `${monthShort[targetMonth]} ${targetDay}, ${targetYear}`,
+      `${monthShort[targetMonth]} ${String(targetDay).padStart(2, '0')}, ${targetYear}`,
+      `${String(targetMonth + 1).padStart(2, '0')}/${String(targetDay).padStart(2, '0')}/${targetYear}`,
+      `${targetMonth + 1}/${targetDay}/${targetYear}`,
+      `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`,
     ];
 
-    // 5. Loop through each section by Anchor
-    categories.forEach((cat) => {
-      const sectionAnchor = $(`a[name="${cat.anchor}"]`);
+    let pdfUrl: string | null = null;
+
+    // Strategy 1: Look for PDF links matching the date
+    $('a[href]').each((_, el) => {
+      if (pdfUrl) return;
       
-      if (sectionAnchor.length > 0) {
-        // Find the table that follows this specific category anchor
-        const targetTable = sectionAnchor.closest('table').nextAll('table').first();
-
-        // 6. FIX: Use "Sibling Logic" to capture records even with broken <tr> tags
-        targetTable.find('th[scope="row"]').each((_, el) => {
-          const $el = $(el);
-          const docket = $el.text().trim();
-          
-          // The title is the first data cell sitting next to the docket number
-          const titleCell = $el.next('td');
-          
-          // IMPROVED DATE LOGIC:
-          // Look at all cells following the title to find the date (MM/DD/YYYY)
-          let dateVal = "";
-          const datePattern = /\d{2}\/\d{2}\/\d{4}/;
-
-          // Check the immediate sibling first
-          const immediateNext = titleCell.next('td').text().trim();
-          if (datePattern.test(immediateNext)) {
-            dateVal = immediateNext;
-          } else {
-            // If not found, scan all following cells in the sequence
-            $el.nextAll('td').each((_, td) => {
-              const text = $(td).text().trim();
-              if (datePattern.test(text)) {
-                dateVal = text;
-                return false; // Exit loop once date is found
-              }
-            });
-          }
-
-          if (docket && titleCell.length > 0) {
-            allEntries.push({
-              number: docket,
-              title: titleCell.text().replace(/\s+/g, ' ').trim(),
-              decided: dateVal || "N/A", // This is your Decided Date field
-              category: cat.name
-            });
-          }
-        });
+      const href = $(el).attr('href') || '';
+      const linkText = $(el).text().trim();
+      const parentText = $(el).parent().text().trim();
+      
+      const isPdfLink = href.toLowerCase().includes('.pdf') || 
+                        href.toLowerCase().includes('pdf') ||
+                        linkText.toLowerCase().includes('pdf') ||
+                        linkText.toLowerCase().includes('download');
+      
+      if (!isPdfLink) return;
+      
+      for (const pattern of datePatterns) {
+        if (linkText.includes(pattern) || parentText.includes(pattern) || href.includes(pattern.replace(/\//g, '-'))) {
+          pdfUrl = href;
+          return;
+        }
+      }
+      
+      const dateStr = `${targetYear}${String(targetMonth + 1).padStart(2, '0')}${String(targetDay).padStart(2, '0')}`;
+      const dateStr2 = `${String(targetMonth + 1).padStart(2, '0')}${String(targetDay).padStart(2, '0')}${targetYear}`;
+      
+      if (href.includes(dateStr) || href.includes(dateStr2)) {
+        pdfUrl = href;
+        return;
       }
     });
 
-    // 7. Data Clean-up
-    const uniqueEntries = allEntries.filter((entry, index, self) =>
-      index === self.findIndex((e) => e.number === entry.number && e.title === entry.title)
-    );
+    // Strategy 2: Look in table rows or list items
+    if (!pdfUrl) {
+      $('tr, li, div, p').each((_, el) => {
+        if (pdfUrl) return;
+        const elementText = $(el).text();
+        
+        for (const pattern of datePatterns) {
+          if (elementText.includes(pattern)) {
+            const link = $(el).find('a[href*=".pdf"], a[href*="pdf"]').first();
+            if (link.length > 0) {
+              pdfUrl = link.attr('href') || null;
+              return;
+            }
+          }
+        }
+      });
+    }
 
-    // 8. Final JSON Response
+    // Strategy 3: Date components in URL
+    if (!pdfUrl) {
+      const mm = String(targetMonth + 1).padStart(2, '0');
+      const dd = String(targetDay).padStart(2, '0');
+      const yyyy = String(targetYear);
+      const yy = String(targetYear).slice(-2);
+      
+      $('a[href]').each((_, el) => {
+        if (pdfUrl) return;
+        const href = $(el).attr('href') || '';
+        
+        if (href.includes(`${mm}-${dd}-${yyyy}`) || 
+            href.includes(`${mm}${dd}${yyyy}`) ||
+            href.includes(`${yyyy}-${mm}-${dd}`) ||
+            href.includes(`${mm}${dd}${yy}`) ||
+            href.includes(`${mm}-${dd}-${yy}`)) {
+          pdfUrl = href;
+        }
+      });
+    }
+
+    if (!pdfUrl) {
+      const allLinks: string[] = [];
+      $('a[href]').each((_, el) => {
+        const href = $(el).attr('href') || '';
+        const text = $(el).text().trim().substring(0, 100);
+        if (href.toLowerCase().includes('pdf') || text.toLowerCase().includes('publication')) {
+          allLinks.push(`${text} -> ${href}`);
+        }
+      });
+
+      return res.status(404).json({
+        success: false,
+        error: `No PDF found for date ${date} on the publications page.`,
+        hint: 'The publication may not be available for this date.',
+        available_links: allLinks.slice(0, 20),
+        searched_patterns: datePatterns,
+        entries: []
+      });
+    }
+
+    // Make URL absolute
+    if (pdfUrl && !pdfUrl.startsWith('http')) {
+      if (pdfUrl.startsWith('/')) {
+        pdfUrl = `https://motus.dot.gov${pdfUrl}`;
+      } else {
+        pdfUrl = `https://motus.dot.gov/customer/${pdfUrl}`;
+      }
+    }
+
     return res.status(200).json({
       success: true,
-      count: uniqueEntries.length,
-      date: registerDate,
-      entries: uniqueEntries
+      date: date,
+      pdf_url: pdfUrl,
+      message: 'PDF URL found. Use the Express server for full PDF parsing.',
+      entries: []
     });
 
   } catch (error: any) {
-    console.error('FMCSA Scrape error:', error.message);
+    console.error('FMCSA Publications error:', error.message);
     return res.status(500).json({
       success: false,
-      error: 'Failed to scrape FMCSA data',
-      details: error.message
+      error: 'Failed to fetch FMCSA publications data',
+      details: error.message,
+      entries: []
     });
   }
 };
